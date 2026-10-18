@@ -1,32 +1,31 @@
-# PeaBox IDE v0.9 — Developer Workflow
+# PeaBox IDE v0.10 — Debugging
 
-## New in v0.9
-- Visual side-by-side Git diff using Monaco Diff Editor
-- Richer Source Control changes list with file status, stage and diff actions
-- Recent commit history in Source Control
-- Split editor with a second Monaco editor pane
-- Project Dashboard showing detected project type, file count, Git branch and change count
-- Run profiles from `.peabox/project.json`
-- Automatic starter run-profile generation for Python and Node projects
-- Markdown preview powered by `marked`
-- Enhanced Explorer presentation with clearer file/folder glyphs
+PeaBox now has a generic Debug Adapter Protocol client and a Python debugging integration using `debugpy`.
 
-## Run profiles
-Example `.peabox/project.json`:
-```json
-{
-  "name": "My App",
-  "commands": {
-    "run": "python app.py",
-    "test": "pytest",
-    "install": "pip install -r requirements.txt"
-  }
-}
-```
-Commands execute locally in the opened project directory. Review project profiles before running commands from projects you do not trust.
+## New
+- Python debugger
+- Editor breakpoints: click the glyph margin or press F9
+- Call Stack panel
+- Variables/scopes panel
+- Watch expressions
+- Debug Console with expression evaluation
+- Continue (`F5`)
+- Step Over (`F10`)
+- Step Into (`F11`)
+- Step Out (`Shift+F11`)
+- Stop (`Shift+F5`)
+- Pause control
+- Debug status indicator
+- DAP request/response/event transport separated from the Python adapter
 
-## Installation
-Extract into a fresh folder and run `setup-peabox-ide.bat`. Later launches use `run-peabox-ide.bat`.
+## Python debugger prerequisite
+The Python interpreter used for the project must have `debugpy` available. Run `setup-python-debugger.bat`, or install it into the project's Python environment yourself. The IDE invokes Python as `python` in this release.
 
-## Portable build
-Run `build-portable-exe.bat`; output goes to `dist`.
+## Architecture
+PeaBox speaks Debug Adapter Protocol messages to the adapter. The current adapter is debugpy, but the UI and transport are intentionally generic around DAP operations such as initialize, breakpoints, stackTrace, scopes, variables, evaluate and stepping.
+
+## Existing features retained
+Visual Git diff, Source Control, split editors, dashboard, run profiles, Markdown preview, enhanced Explorer, Pyright LSP, themes, terminal and menu bar.
+
+## Install PeaBox
+Run `setup-peabox-ide.bat`; later launches use `run-peabox-ide.bat`.
