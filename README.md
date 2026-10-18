@@ -1,30 +1,25 @@
-# PeaBox IDE v0.6
+# PeaBox IDE v0.7 — Developer Intelligence
 
-## New
-- Project-wide Python type checking through Pyright JSON diagnostics
-- Project-wide TypeScript/JavaScript checking through `tsc --noEmit` when a `tsconfig.json` exists
-- Unified project Problems panel with file/line navigation
-- Project symbol index across Python, JS, TS, Java, Go, Rust, C# and C/C++
-- Project symbol search from the Command Palette
-- Textual project reference search for the symbol under the cursor
-- Improved admin-free setup with portable Node auto-detection and clearer error handling
-- Portable Windows EXE plus ZIP packaging
-- Portable settings stored beside the packaged executable
+## New in v0.7
+- Always-on Pyright language server over JSON-RPC/LSP
+- Semantic Python completion while typing
+- Hover documentation and inferred types
+- Go to Definition (`F12`)
+- Find References (`Shift+F12`)
+- Semantic project rename (`F2`)
+- Live diagnostics as files change
+- Quick Fix / Code Actions from Pyright where available
+- Semantic Python Outline panel
+- Language-server status in the status bar
+
+## Existing strengths retained
+Project-wide Pyright and TypeScript checks, project symbols, terminal, Git workflow, command palette, recent projects, session restoration, settings, autosave, project search, Monaco editor, no-admin setup, portable EXE/ZIP packaging.
 
 ## Install without admin rights
-Extract the source ZIP and double-click `setup-peabox-ide.bat`. It detects Node in a local `node` folder, the user's existing helper path, or PATH. Later use `run-peabox-ide.bat`.
+Extract the ZIP and double-click `setup-peabox-ide.bat`. The setup detects portable Node in a local `node` folder, your existing helpers path, or PATH. Later use `run-peabox-ide.bat`.
 
-## Type checking
-Use **Check Project** in the toolbar or the Problems sidebar. Python projects can add `pyrightconfig.json`; `pyrightconfig.sample.json` is included. JS/TS projects should include `tsconfig.json`.
+## Package for end users
+Double-click `build-portable-exe.bat`. The `dist` folder receives the portable EXE and ZIP. End users of the packaged build do not need Node or npm. Building may require internet access for Electron packaging assets.
 
-## Navigation
-- `Ctrl+Shift+O`: project symbols
-- `Ctrl+Shift+R`: textual references for the word under the cursor
-- `Ctrl+G`: go to line
-- `F12`: Monaco definition navigation where its language service supports it
-
-## Portable package
-Run `build-portable-exe.bat`. Distributables appear in `dist`. The packaged application includes its runtime and IDE dependencies; end users do not install Node/npm. Building requires internet access for packaging artifacts. See `PORTABLE.md`.
-
-## Scope
-Pyright provides real project-level Python static analysis. The code-navigation index is local and language-agnostic, but reference search is textual rather than semantic. A future always-on language-server client would be required for fully semantic cross-file completion, rename and references.
+## Current scope
+The live LSP client is focused on Python/Pyright. JavaScript and TypeScript continue to use Monaco's built-in language services plus project-wide `tsc` checks. Workspace edits are applied through Monaco; files involved in cross-file rename should be opened by Monaco when the edit is applied. A future release can add a generalized LSP registry for more languages.
