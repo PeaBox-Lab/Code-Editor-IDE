@@ -1,1 +1,32 @@
-{"name":"peabox-ide","version":"0.1.0","private":true,"description":"A minimal desktop coding IDE","main":"main.js","scripts":{"start":"electron ."},"dependencies":{"@xterm/addon-fit":"^0.10.0","@xterm/xterm":"^5.5.0","monaco-editor":"^0.52.0"},"devDependencies":{"electron":"^38.0.0"}}
+{
+  "name": "peabox-ide",
+  "version": "0.3.0",
+  "private": true,
+  "description": "A practical lightweight desktop code editor",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "build:portable": "electron-builder --win portable"
+  },
+  "dependencies": {
+    "monaco-editor": "^0.52.0"
+  },
+  "devDependencies": {
+    "electron": "^38.0.0",
+    "electron-builder": "^26.0.12"
+  },
+  "build": {
+    "appId": "com.peabox.ide",
+    "productName": "PeaBox IDE",
+    "files": [
+      "**/*",
+      "!node_modules/.cache/**"
+    ],
+    "win": {
+      "target": "portable"
+    },
+    "directories": {
+      "output": "dist"
+    }
+  }
+}

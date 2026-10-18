@@ -1,26 +1,29 @@
-# PeaBox IDE
+# PeaBox IDE v0.3
 
-A deliberately small desktop coding IDE. No AI, accounts, telemetry, marketplace, debugger, Git UI or cloud services in v0.1.
+A lightweight, local desktop development environment. No AI, accounts, telemetry, or cloud requirement in the editor itself.
 
-## Features
-- Open a local project folder
-- Explorer tree
-- Monaco code editor with syntax highlighting
-- Create/open/edit/save files
-- Ctrl+S
-- Command runner/output panel
-- Dark desktop UI
+## Developer features
+- Monaco multi-tab editor with syntax highlighting, minimap, bracket coloring and built-in editor commands
+- Project explorer; create files/folders; rename files
+- Project-wide search with jump-to-line
+- Quick Open (`Ctrl+P`)
+- Save / Save All with dirty-tab indicators
+- Format Document (`Alt+Shift+F`) where Monaco has a formatter registered
+- Toggle line comments (`Ctrl+/`)
+- Run/stop commands in the workspace with output and exit code
+- Basic Git source-control panel: branch/status and unstaged diff, using the system Git executable
+- Sidebar toggle (`Ctrl+B`)
+- Portable Node auto-detection
+- One-click setup/run BAT files
+- electron-builder portable Windows EXE configuration
 
-## Run
-1. Install a current Node.js release.
-2. Open a terminal in this folder.
-3. `npm install`
-4. `npm start`
+## Run without admin rights
+Double-click `install-and-run.bat`. On this machine it automatically checks `%USERPROFILE%\\Downloads\\Apps\\helpers\\1\\node`. Alternatively put portable Node in `node` beside the BAT file.
 
-Commands entered in Run execute on your local machine in the opened project directory. Only run code you trust.
+Later launches: `run-peabox-ide.bat`.
 
-## Architecture
-Electron main process owns filesystem/dialog/process access. The renderer receives a limited API through the preload context bridge. Monaco provides editing.
+## Portable Windows build
+Double-click `build-portable-exe.bat`; output goes to `dist`.
 
-## Suggested next iterations
-Tabs, find/replace, integrated PTY terminal, Git status/commit, settings, keyboard shortcut editor, project search, language-server support, debugger, packaging.
+## Notes
+Git features require `git` to be callable on the machine. Format Document depends on a formatter being available for the current Monaco language. The output runner is not yet a fully interactive PTY terminal.
