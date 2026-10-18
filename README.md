@@ -1,31 +1,24 @@
-# PeaBox IDE v0.10 — Debugging
+# PeaBox IDE v0.11 — Multi-language Intelligence
 
-PeaBox now has a generic Debug Adapter Protocol client and a Python debugging integration using `debugpy`.
+PeaBox now includes a reusable multi-process LSP Manager instead of treating Python as the IDE architecture.
 
-## New
-- Python debugger
-- Editor breakpoints: click the glyph margin or press F9
-- Call Stack panel
-- Variables/scopes panel
-- Watch expressions
-- Debug Console with expression evaluation
-- Continue (`F5`)
-- Step Over (`F10`)
-- Step Into (`F11`)
-- Step Out (`Shift+F11`)
-- Stop (`Shift+F5`)
-- Pause control
-- Debug status indicator
-- DAP request/response/event transport separated from the Python adapter
+## Language integrations
+- Python: bundled Pyright language server
+- Go: `gopls` when installed and on PATH
+- Rust: `rust-analyzer` when installed and on PATH
+- C/C++: `clangd` when installed and on PATH
 
-## Python debugger prerequisite
-The Python interpreter used for the project must have `debugpy` available. Run `setup-python-debugger.bat`, or install it into the project's Python environment yourself. The IDE invokes Python as `python` in this release.
+## Shared LSP capabilities
+For servers that implement them, PeaBox registers the same generic editor integrations: completion, hover, go to definition, references, rename, diagnostics and code actions. Each language server runs as a separate stdio JSON-RPC process with its own lifecycle, pending-request map and document synchronization.
 
-## Architecture
-PeaBox speaks Debug Adapter Protocol messages to the adapter. The current adapter is debugpy, but the UI and transport are intentionally generic around DAP operations such as initialize, breakpoints, stackTrace, scopes, variables, evaluate and stepping.
+## Language Intelligence view
+Use the new `{ }` activity-bar entry to see which language servers PeaBox detects. Python/Pyright is bundled. External servers are started on demand when a matching source file is opened.
+
+## Check your machine
+Run `check-language-servers.bat` to see whether `gopls`, `rust-analyzer` and `clangd` are callable from PATH. Missing servers do not prevent PeaBox from running.
 
 ## Existing features retained
-Visual Git diff, Source Control, split editors, dashboard, run profiles, Markdown preview, enhanced Explorer, Pyright LSP, themes, terminal and menu bar.
+Python DAP debugging, breakpoints, call stack, variables, watches, Debug Console, visual Git diff, Source Control, split editors, project dashboard, run profiles, Markdown preview, themes, terminal and menu bar.
 
-## Install PeaBox
-Run `setup-peabox-ide.bat`; later launches use `run-peabox-ide.bat`.
+## Install
+Run `setup-peabox-ide.bat`; later use `run-peabox-ide.bat`.
