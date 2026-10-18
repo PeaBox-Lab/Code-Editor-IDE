@@ -33,4 +33,14 @@ ipcMain.handle('lsp:save',(_,p,text)=>{lspSend({jsonrpc:'2.0',method:'textDocume
 ipcMain.handle('lsp:request',(_,method,params)=>lspRequest(method,params));
 ipcMain.handle('lsp:stop',()=>{if(lspProc)lspProc.kill();lspProc=null;return true});
 
+
+ipcMain.handle('git:file-content',async(_,cwd,rel,rev)=>{let spec=rev?`${rev}:${rel.replace(/\\/g,'/')}`:`HEAD:${rel.replace(/\\/g,'/')}`;return cmd(cwd,`git show "${spec}"`)});
+ipcMain.handle('git:log',(_,cwd)=>cmd(cwd,'git log -20 --pretty=format:"%h%x09%an%x09%ad%x09%s" --date=short'));
+ipcMain.handle('git:stage-all',(_,cwd)=>cmd(cwd,'git add -A'));
+ipcMain.handle('git:create-branch',(_,cwd,b)=>cmd(cwd,`git switch -c "${b}"`));
+ipcMain.handle('project:info',async(_,cwd)=>{let names=fs.readdirSync(cwd);let type=names.includes('pyproject.toml')||names.includes('requirements.txt')?'Python':names.includes('package.json')?'Node / JavaScript':names.includes('go.mod')?'Go':names.includes('Cargo.toml')?'Rust':'General';let count=0;function rec(d){for(let x of fs.readdirSync(d,{withFileTypes:true})){if(['node_modules','.git','dist','.venv','__pycache__'].includes(x.name))continue;let p=path.join(d,x.name);x.isDirectory()?rec(p):count++}}try{rec(cwd)}catch{}let g=await cmd(cwd,'git status --short --branch');return{name:path.basename(cwd),type,fileCount:count,git:g.text}});
+ipcMain.handle('profile:load',(_,cwd)=>{let p=path.join(cwd,'.peabox','project.json');try{return JSON.parse(fs.readFileSync(p,'utf8'))}catch{return null}});
+ipcMain.handle('profile:create',(_,cwd,data)=>{let d=path.join(cwd,'.peabox');fs.mkdirSync(d,{recursive:true});fs.writeFileSync(path.join(d,'project.json'),JSON.stringify(data,null,2));return true});
+ipcMain.handle('file:absolute',(_,cwd,rel)=>path.resolve(cwd,rel));
+
 ipcMain.handle('state:load',()=>({recent:[],settings:{}}));ipcMain.handle('state:save',()=>true);
