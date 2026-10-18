@@ -1,0 +1,17 @@
+{
+  "python": {
+    "server": "bundled-pyright"
+  },
+  "go": {
+    "command": "gopls"
+  },
+  "rust": {
+    "command": "rust-analyzer"
+  },
+  "cpp": {
+    "command": "clangd",
+    "args": [
+      "--background-index"
+    ]
+  }
+}
