@@ -1,17 +1,21 @@
 {
   "name": "peabox-ide",
-  "version": "0.4.0",
+  "version": "0.6.0",
   "private": true,
   "description": "A practical lightweight desktop code editor",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "build:portable": "electron-builder --win portable"
+    "build:portable": "electron-builder --win portable zip --x64",
+    "check": "node tools/check-project.js",
+    "build:unpacked": "electron-builder --win dir --x64"
   },
   "dependencies": {
     "monaco-editor": "^0.52.0",
     "@xterm/xterm": "^5.5.0",
-    "@xterm/addon-fit": "^0.10.0"
+    "@xterm/addon-fit": "^0.10.0",
+    "pyright": "^1.1.414",
+    "typescript": "^5.9.3"
   },
   "devDependencies": {
     "electron": "^38.0.0",
@@ -25,10 +29,15 @@
       "!node_modules/.cache/**"
     ],
     "win": {
-      "target": "portable"
+      "target": [
+        "portable",
+        "zip"
+      ]
     },
     "directories": {
       "output": "dist"
-    }
+    },
+    "artifactName": "PeaBox-IDE-${version}-${arch}.${ext}",
+    "asar": true
   }
 }

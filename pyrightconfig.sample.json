@@ -1,0 +1,9 @@
+{
+  "typeCheckingMode": "standard",
+  "exclude": [
+    "**/node_modules",
+    "**/.venv",
+    "**/dist",
+    "**/__pycache__"
+  ]
+}

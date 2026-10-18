@@ -1,27 +1,30 @@
-# PeaBox IDE v0.4
+# PeaBox IDE v0.6
 
-A lightweight local IDE with five major usability upgrades.
+## New
+- Project-wide Python type checking through Pyright JSON diagnostics
+- Project-wide TypeScript/JavaScript checking through `tsc --noEmit` when a `tsconfig.json` exists
+- Unified project Problems panel with file/line navigation
+- Project symbol index across Python, JS, TS, Java, Go, Rust, C# and C/C++
+- Project symbol search from the Command Palette
+- Textual project reference search for the symbol under the cursor
+- Improved admin-free setup with portable Node auto-detection and clearer error handling
+- Portable Windows EXE plus ZIP packaging
+- Portable settings stored beside the packaged executable
 
-## v0.4 features
-- Persistent interactive shell panel using xterm.js and a local PowerShell/CMD process
-- Git stage, unstage, discard, commit, pull, push, branch listing/switching, status and diff
-- Command Palette (`Ctrl+Shift+P`)
-- Recent projects and restoration of the last workspace, open tabs and active file
-- Settings for autosave, format-on-save, font size, minimap, word wrap and terminal shell
+## Install without admin rights
+Extract the source ZIP and double-click `setup-peabox-ide.bat`. It detects Node in a local `node` folder, the user's existing helper path, or PATH. Later use `run-peabox-ide.bat`.
 
-Also retained: Monaco tabs, project explorer, search, quick editing, run/output, syntax highlighting and portable packaging.
+## Type checking
+Use **Check Project** in the toolbar or the Problems sidebar. Python projects can add `pyrightconfig.json`; `pyrightconfig.sample.json` is included. JS/TS projects should include `tsconfig.json`.
 
-## Install and run without admin rights
-1. Extract the ZIP.
-2. Double-click `install-and-run.bat`.
-3. Later, double-click `run-peabox-ide.bat`.
+## Navigation
+- `Ctrl+Shift+O`: project symbols
+- `Ctrl+Shift+R`: textual references for the word under the cursor
+- `Ctrl+G`: go to line
+- `F12`: Monaco definition navigation where its language service supports it
 
-The launcher checks your portable Node path under `%USERPROFILE%\Downloads\Apps\helpers\1\node`, or a `node` folder beside the application.
+## Portable package
+Run `build-portable-exe.bat`. Distributables appear in `dist`. The packaged application includes its runtime and IDE dependencies; end users do not install Node/npm. Building requires internet access for packaging artifacts. See `PORTABLE.md`.
 
-## Build a portable EXE
-Double-click `build-portable-exe.bat`. Output goes to `dist`.
-
-## Notes
-- Git actions require Git to be available on PATH.
-- The shell is persistent and accepts keyboard input, but this version uses standard process pipes rather than a native Windows pseudoterminal binding. Most ordinary PowerShell/CMD commands work; full-screen console programs may not render correctly.
-- Review changes before using discard, pull, push or branch switching.
+## Scope
+Pyright provides real project-level Python static analysis. The code-navigation index is local and language-agnostic, but reference search is textual rather than semantic. A future always-on language-server client would be required for fully semantic cross-file completion, rename and references.
