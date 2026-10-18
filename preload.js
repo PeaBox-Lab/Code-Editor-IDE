@@ -1,0 +1,1 @@
+const {contextBridge,ipcRenderer}=require('electron');contextBridge.exposeInMainWorld('api',{openFolder:()=>ipcRenderer.invoke('open-folder'),read:p=>ipcRenderer.invoke('read-file',p),save:(p,c)=>ipcRenderer.invoke('save-file',p,c),newFile:d=>ipcRenderer.invoke('new-file',d),run:(d,c)=>ipcRenderer.invoke('run',d,c),onOutput:f=>ipcRenderer.on('run-output',(_,x)=>f(x))});
