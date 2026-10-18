@@ -1,43 +1,29 @@
-# PeaBox IDE v0.2
+# PeaBox IDE v0.3
 
-A lightweight desktop IDE focused on useful local coding. No AI, accounts, telemetry, cloud sync, extension marketplace, or admin installation.
+A lightweight, local desktop development environment. No AI, accounts, telemetry, or cloud requirement in the editor itself.
 
-## What is included
+## Developer features
+- Monaco multi-tab editor with syntax highlighting, minimap, bracket coloring and built-in editor commands
+- Project explorer; create files/folders; rename files
+- Project-wide search with jump-to-line
+- Quick Open (`Ctrl+P`)
+- Save / Save All with dirty-tab indicators
+- Format Document (`Alt+Shift+F`) where Monaco has a formatter registered
+- Toggle line comments (`Ctrl+/`)
+- Run/stop commands in the workspace with output and exit code
+- Basic Git source-control panel: branch/status and unstaged diff, using the system Git executable
+- Sidebar toggle (`Ctrl+B`)
+- Portable Node auto-detection
+- One-click setup/run BAT files
+- electron-builder portable Windows EXE configuration
 
-- Multi-tab Monaco editor with unsaved indicators
-- Syntax highlighting for common development languages
-- Project explorer with folder-first sorting
-- Create file and folder, rename from explorer context menu
-- Save and Save All
-- Project-wide text search with line navigation
-- Quick Open with `Ctrl+P`
-- Run/stop local commands with an output panel
-- Status bar with cursor position and language
-- Keyboard shortcuts and welcome screen
-- Portable Node detection
-- One-click dependency setup and launch
-- Portable EXE build configuration
+## Run without admin rights
+Double-click `install-and-run.bat`. On this machine it automatically checks `%USERPROFILE%\\Downloads\\Apps\\helpers\\1\\node`. Alternatively put portable Node in `node` beside the BAT file.
 
-## Fastest start on your computer
+Later launches: `run-peabox-ide.bat`.
 
-Double-click `install-and-run.bat`.
+## Portable Windows build
+Double-click `build-portable-exe.bat`; output goes to `dist`.
 
-It automatically looks for portable Node at:
-
-`%USERPROFILE%\Downloads\Apps\helpers\1\node`
-
-You can alternatively create a `node` folder inside PeaBox IDE and extract portable Node there.
-
-On the first launch the script installs dependencies. Later, double-click `run-peabox-ide.bat`.
-
-## Build a portable EXE
-
-Double-click `build-portable-exe.bat`. The result is written to `dist`.
-
-## Security
-
-The Run panel executes shell commands on the local machine inside the opened project folder. Only open and run trusted projects.
-
-## Known v0.2 limitations
-
-The output area is a command output panel, not yet a fully interactive PTY terminal. Debug adapters, Git UI, language servers, autocomplete beyond Monaco defaults, package managers, and extensions are intentionally not part of this version.
+## Notes
+Git features require `git` to be callable on the machine. Format Document depends on a formatter being available for the current Monaco language. The output runner is not yet a fully interactive PTY terminal.

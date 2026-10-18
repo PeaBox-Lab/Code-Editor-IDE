@@ -15,3 +15,6 @@ ipcMain.handle('project:search',(_,root,q)=>{let hits=[];function rec(d){for(let
 ipcMain.handle('process:run',(_,cwd,cmd)=>{if(proc)return {ok:false,error:'A process is already running'};proc=spawn(cmd,{cwd,shell:true,env:process.env});proc.stdout.on('data',d=>win.webContents.send('process:output',d.toString()));proc.stderr.on('data',d=>win.webContents.send('process:output',d.toString()));proc.on('close',c=>{win.webContents.send('process:exit',c);proc=null});return {ok:true}});
 ipcMain.handle('process:stop',()=>{if(!proc)return false;proc.kill();proc=null;return true});
 ipcMain.handle('shell:show',(_,p)=>require('electron').shell.showItemInFolder(p));
+ipcMain.handle('git:status',(_,cwd)=>new Promise(resolve=>{let p=spawn('git',['status','--short','--branch'],{cwd,shell:true});let s='';p.stdout.on('data',d=>s+=d);p.stderr.on('data',d=>s+=d);p.on('close',c=>resolve({code:c,text:s}))}));
+ipcMain.handle('git:diff',(_,cwd)=>new Promise(resolve=>{let p=spawn('git',['diff'],{cwd,shell:true});let s='';p.stdout.on('data',d=>s+=d);p.stderr.on('data',d=>s+=d);p.on('close',c=>resolve({code:c,text:s}))}));
+ipcMain.handle('file:duplicate',(_,p)=>{let ext=path.extname(p),base=p.slice(0,-ext.length),q=base+' copy'+ext,i=2;while(fs.existsSync(q))q=base+' copy '+(i++)+ext;fs.copyFileSync(p,q);return q});
