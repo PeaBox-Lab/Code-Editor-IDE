@@ -1,0 +1,8 @@
+{
+  "name": "My PeaBox Project",
+  "commands": {
+    "run": "python app.py",
+    "test": "pytest",
+    "install": "pip install -r requirements.txt"
+  }
+}

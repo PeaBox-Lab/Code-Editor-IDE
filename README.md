@@ -1,25 +1,32 @@
-# PeaBox IDE v0.8.1
+# PeaBox IDE v0.9 — Developer Workflow
 
-A usability-focused update to v0.8.
+## New in v0.9
+- Visual side-by-side Git diff using Monaco Diff Editor
+- Richer Source Control changes list with file status, stage and diff actions
+- Recent commit history in Source Control
+- Split editor with a second Monaco editor pane
+- Project Dashboard showing detected project type, file count, Git branch and change count
+- Run profiles from `.peabox/project.json`
+- Automatic starter run-profile generation for Python and Node projects
+- Markdown preview powered by `marked`
+- Enhanced Explorer presentation with clearer file/folder glyphs
 
-## New
-- Full light theme designed specifically for PeaBox IDE
-- One-click sun/moon theme switcher
-- Theme preference persists with PeaBox settings
-- Monaco editor switches between `vs-dark` and `vs` with the app theme
-- Redesigned welcome dashboard with PeaBox branding
-- Large Start actions: Open Project Folder, New File and Command Palette
-- Improved Recent Projects cards with project name and full path
-- One-click opening of recent projects
-- Remove individual recent projects
-- Clear the complete recent-project list
-- Automatically removes inaccessible recent project entries when selected
-- Responsive welcome layout for narrower windows
+## Run profiles
+Example `.peabox/project.json`:
+```json
+{
+  "name": "My App",
+  "commands": {
+    "run": "python app.py",
+    "test": "pytest",
+    "install": "pip install -r requirements.txt"
+  }
+}
+```
+Commands execute locally in the opened project directory. Review project profiles before running commands from projects you do not trust.
 
-All v0.8 menu-bar, context-menu, Pyright LSP, terminal and developer features remain included.
-
-## Install
+## Installation
 Extract into a fresh folder and run `setup-peabox-ide.bat`. Later launches use `run-peabox-ide.bat`.
 
-## Portable package
-Run `build-portable-exe.bat`; distributables are created in `dist`.
+## Portable build
+Run `build-portable-exe.bat`; output goes to `dist`.
