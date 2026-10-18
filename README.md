@@ -1,29 +1,27 @@
-# PeaBox IDE v0.3
+# PeaBox IDE v0.4
 
-A lightweight, local desktop development environment. No AI, accounts, telemetry, or cloud requirement in the editor itself.
+A lightweight local IDE with five major usability upgrades.
 
-## Developer features
-- Monaco multi-tab editor with syntax highlighting, minimap, bracket coloring and built-in editor commands
-- Project explorer; create files/folders; rename files
-- Project-wide search with jump-to-line
-- Quick Open (`Ctrl+P`)
-- Save / Save All with dirty-tab indicators
-- Format Document (`Alt+Shift+F`) where Monaco has a formatter registered
-- Toggle line comments (`Ctrl+/`)
-- Run/stop commands in the workspace with output and exit code
-- Basic Git source-control panel: branch/status and unstaged diff, using the system Git executable
-- Sidebar toggle (`Ctrl+B`)
-- Portable Node auto-detection
-- One-click setup/run BAT files
-- electron-builder portable Windows EXE configuration
+## v0.4 features
+- Persistent interactive shell panel using xterm.js and a local PowerShell/CMD process
+- Git stage, unstage, discard, commit, pull, push, branch listing/switching, status and diff
+- Command Palette (`Ctrl+Shift+P`)
+- Recent projects and restoration of the last workspace, open tabs and active file
+- Settings for autosave, format-on-save, font size, minimap, word wrap and terminal shell
 
-## Run without admin rights
-Double-click `install-and-run.bat`. On this machine it automatically checks `%USERPROFILE%\\Downloads\\Apps\\helpers\\1\\node`. Alternatively put portable Node in `node` beside the BAT file.
+Also retained: Monaco tabs, project explorer, search, quick editing, run/output, syntax highlighting and portable packaging.
 
-Later launches: `run-peabox-ide.bat`.
+## Install and run without admin rights
+1. Extract the ZIP.
+2. Double-click `install-and-run.bat`.
+3. Later, double-click `run-peabox-ide.bat`.
 
-## Portable Windows build
-Double-click `build-portable-exe.bat`; output goes to `dist`.
+The launcher checks your portable Node path under `%USERPROFILE%\Downloads\Apps\helpers\1\node`, or a `node` folder beside the application.
+
+## Build a portable EXE
+Double-click `build-portable-exe.bat`. Output goes to `dist`.
 
 ## Notes
-Git features require `git` to be callable on the machine. Format Document depends on a formatter being available for the current Monaco language. The output runner is not yet a fully interactive PTY terminal.
+- Git actions require Git to be available on PATH.
+- The shell is persistent and accepts keyboard input, but this version uses standard process pipes rather than a native Windows pseudoterminal binding. Most ordinary PowerShell/CMD commands work; full-screen console programs may not render correctly.
+- Review changes before using discard, pull, push or branch switching.
