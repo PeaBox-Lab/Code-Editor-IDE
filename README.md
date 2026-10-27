@@ -1,4 +1,4 @@
-# PeaBox IDE v0.12 - Developer Experience
+# PeaBox IDE v0.12.1 - Developer Experience
 
 A usability and product-hardening release focused on the workflows developers use every day.
 
@@ -24,7 +24,7 @@ Download the Windows release ZIP, extract it, and double-click `PeaBox IDE.exe`.
 Contributors need Node.js and npm only for source development and packaging:
 
 ```bat
-run-from-source.bat
+START_PEABOX_IDE.bat
 ```
 
 Build the portable Windows release with:
@@ -37,3 +37,7 @@ The generated end-user artifacts are placed in `dist`.
 
 ## Optional developer tools
 PeaBox itself launches without these tools. Individual workflows may use Python, Git, Go, Rust, debugpy, gopls, rust-analyzer or clangd. The Environment view shows what is available.
+
+## If the window does not open
+
+Run `CHECK_PEABOX.bat`, then inspect `peabox-startup.log`. The launcher now remains visible and reports missing Node, failed dependency installation, or Electron startup errors instead of closing silently.

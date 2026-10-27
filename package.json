@@ -1,6 +1,6 @@
 {
   "name": "peabox-ide",
-  "version": "0.12.0",
+  "version": "0.12.1",
   "main": "main.js",
   "scripts": {
     "start": "electron .",

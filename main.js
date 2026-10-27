@@ -1,4 +1,6 @@
 const{app,BrowserWindow,ipcMain,dialog,Menu,shell}=require('electron');const fs=require('fs'),path=require('path'),{spawn}=require('child_process'),net=require('net');let win,terminal=null;
+function cmd(cwd,command){return new Promise(resolve=>{let p=spawn(command,{cwd:cwd||app.getPath('home'),shell:true,windowsHide:true}),text='';p.stdout.on('data',d=>text+=d.toString());p.stderr.on('data',d=>text+=d.toString());p.on('error',e=>resolve({code:1,text:e.message}));p.on('close',code=>resolve({code:code??0,text}))})}
+
 
 function send(command,arg){if(win&&!win.isDestroyed())win.webContents.send('menu:command',{command,arg})}
 function installMenu(){const isMac=process.platform==='darwin';const template=[
@@ -16,7 +18,7 @@ ipcMain.on('context:editor',()=>{Menu.buildFromTemplate([{label:'Undo',role:'und
 ipcMain.on('context:file',(_,p)=>{Menu.buildFromTemplate([{label:'Open',click:()=>send('openPath',p)},{label:'Rename',click:()=>send('renamePath',p)},{label:'Delete',click:()=>send('deletePath',p)},{type:'separator'},{label:'Copy Path',click:()=>require('electron').clipboard.writeText(p)},{label:'Reveal in File Explorer',click:()=>shell.showItemInFolder(p)},{label:'Open Terminal Here',click:()=>send('terminalAt',p)}]).popup({window:win})});
 
 function walk(root){function r(d){return fs.readdirSync(d,{withFileTypes:true}).filter(x=>!['node_modules','.git','dist','.venv','__pycache__'].includes(x.name)).map(x=>{let p=path.join(d,x.name);return x.isDirectory()?{name:x.name,path:p,dir:true,children:r(p)}:{name:x.name,path:p,dir:false}})}return{root,children:r(root)}}
-app.whenReady().then(()=>{installMenu();win=new BrowserWindow({width:1450,height:900,webPreferences:{preload:path.join(__dirname,'preload.js'),contextIsolation:true}});win.loadFile('index.html')});app.on('window-all-closed',()=>app.quit());
+app.whenReady().then(()=>{installMenu();win=new BrowserWindow({width:1450,height:900,webPreferences:{preload:path.join(__dirname,'preload.js'),contextIsolation:true}});win.webContents.on('console-message',(_,level,message,line,source)=>{let log=path.join(app.getPath('userData'),'peabox-error.log');fs.mkdirSync(path.dirname(log),{recursive:true});fs.appendFileSync(log,`[${new Date().toISOString()}] ${level} ${message} (${source}:${line})\n`)});win.loadFile('index.html')});app.on('window-all-closed',()=>app.quit());
 ipcMain.handle('folder:open',async()=>{let x=await dialog.showOpenDialog({properties:['openDirectory']});return x.canceled?null:walk(x.filePaths[0])});ipcMain.handle('folder:load',(_,p)=>walk(p));ipcMain.handle('folder:refresh',(_,p)=>walk(p));ipcMain.handle('file:read',(_,p)=>({content:fs.readFileSync(p,'utf8')}));ipcMain.handle('file:write',(_,p,c)=>fs.writeFileSync(p,c));
 ipcMain.handle('terminal:start',(_,cwd)=>{if(terminal)terminal.kill();terminal=spawn('powershell.exe',['-NoLogo'],{cwd:cwd||app.getPath('home')});terminal.stdout.on('data',d=>win.webContents.send('terminal:data',d.toString()));terminal.stderr.on('data',d=>win.webContents.send('terminal:data',d.toString()));return true});ipcMain.on('terminal:input',(_,d)=>terminal&&terminal.stdin.write(d));
 
