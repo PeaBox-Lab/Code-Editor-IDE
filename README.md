@@ -31,3 +31,12 @@ Tasks are saved in `.peabox/project.json`. Only run commands from projects you t
 
 ## Testing
 Python projects use `python -m pytest`; install pytest in the selected environment. Node projects use test-related scripts from `package.json`.
+
+## Build the portable Windows release
+
+The repository includes two supported build routes:
+
+- GitHub Actions: `.github/workflows/windows-portable.yml`
+- Local Windows: `BUILD_WINDOWS_PORTABLE.bat`
+
+See `PORTABLE_RELEASE.md`. The generated EXE is for end users and does not require Node.js or npm.
