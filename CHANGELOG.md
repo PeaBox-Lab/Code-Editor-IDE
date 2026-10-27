@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.13.0
+
+- Added Testing view for pytest and Node scripts.
+- Added Project Tasks view and editor.
+- Added practical Settings and runtime paths.
+- Added source smoke test.
+- Retained v0.12.1 startup fixes and diagnostics.
+
+# Changelog
+
 ## 0.12.1
 
 - Fixed startup-blocking missing DOM controls.

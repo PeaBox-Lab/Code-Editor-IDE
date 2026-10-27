@@ -1,43 +1,33 @@
-# PeaBox IDE v0.12.1 - Developer Experience
+# PeaBox IDE v0.13 - Everyday Developer Workflow
 
-A usability and product-hardening release focused on the workflows developers use every day.
+## New in v0.13
+- Test Explorer for Python `pytest` and Node package test scripts
+- Discover, run one, or run all tests
+- Test output and pass/fail status
+- Project Tasks view backed by `.peabox/project.json`
+- Built-in task editor using `Name = command` lines
+- Runtime and editor Settings dialog
+- Auto-save preference, theme and font size
+- Portable Python and Git executable path settings
+- Improved project test-provider detection
+- Static `SMOKE_TEST.bat` for source validation
 
-## For users
-Download the Windows release ZIP, extract it, and double-click `PeaBox IDE.exe`. No Node.js, npm, installer, administrator rights, or PATH changes are required for the packaged release.
+## End users
+Use the packaged Windows ZIP and run `PeaBox IDE.exe`. The packaged release does not require Node.js, npm, or administrator rights.
 
-## Highlights
-- Streamlined Explorer, Search, Source Control and Run/Debug navigation
-- Collapsible project tree with useful file icons
-- Working tabs, dirty markers, close protection and session restore
-- Quick Open with `Ctrl+P`
-- Project search with clickable file and line results
-- New file and folder actions
-- Terminal, Problems, Output and Debug Console bottom-panel tabs
-- Run current Python, JavaScript, Go and Rust files
-- Git branch/status, stage, discard, diff, commit, pull and push workflows
-- Environment health view for Python, Git, Go, Rust and clangd
-- Persistent recent projects, theme, workspace and open files
-- Consolidated generic LSP Manager; removed the duplicate Python-only client
-- Existing DAP debugging, Markdown preview, split editors and Monaco editing retained
+## Source mode
+Double-click `START_PEABOX_IDE.bat`. It uses portable Node from a local `node` folder or the previously supported helper path. Startup details are written to `peabox-startup.log`.
 
-## Source development
-Contributors need Node.js and npm only for source development and packaging:
+## Project tasks
+Open **Tasks**, choose the gear button, and enter one task per line:
 
-```bat
-START_PEABOX_IDE.bat
+```text
+Run app = python app.py
+Tests = python -m pytest
+Install = python -m pip install -r requirements.txt
 ```
 
-Build the portable Windows release with:
+Tasks are saved in `.peabox/project.json`. Only run commands from projects you trust.
 
-```bat
-build-release.bat
-```
-
-The generated end-user artifacts are placed in `dist`.
-
-## Optional developer tools
-PeaBox itself launches without these tools. Individual workflows may use Python, Git, Go, Rust, debugpy, gopls, rust-analyzer or clangd. The Environment view shows what is available.
-
-## If the window does not open
-
-Run `CHECK_PEABOX.bat`, then inspect `peabox-startup.log`. The launcher now remains visible and reports missing Node, failed dependency installation, or Electron startup errors instead of closing silently.
+## Testing
+Python projects use `python -m pytest`; install pytest in the selected environment. Node projects use test-related scripts from `package.json`.
