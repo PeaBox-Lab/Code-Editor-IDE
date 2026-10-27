@@ -1,24 +1,39 @@
-# PeaBox IDE v0.11 — Multi-language Intelligence
+# PeaBox IDE v0.12 - Developer Experience
 
-PeaBox now includes a reusable multi-process LSP Manager instead of treating Python as the IDE architecture.
+A usability and product-hardening release focused on the workflows developers use every day.
 
-## Language integrations
-- Python: bundled Pyright language server
-- Go: `gopls` when installed and on PATH
-- Rust: `rust-analyzer` when installed and on PATH
-- C/C++: `clangd` when installed and on PATH
+## For users
+Download the Windows release ZIP, extract it, and double-click `PeaBox IDE.exe`. No Node.js, npm, installer, administrator rights, or PATH changes are required for the packaged release.
 
-## Shared LSP capabilities
-For servers that implement them, PeaBox registers the same generic editor integrations: completion, hover, go to definition, references, rename, diagnostics and code actions. Each language server runs as a separate stdio JSON-RPC process with its own lifecycle, pending-request map and document synchronization.
+## Highlights
+- Streamlined Explorer, Search, Source Control and Run/Debug navigation
+- Collapsible project tree with useful file icons
+- Working tabs, dirty markers, close protection and session restore
+- Quick Open with `Ctrl+P`
+- Project search with clickable file and line results
+- New file and folder actions
+- Terminal, Problems, Output and Debug Console bottom-panel tabs
+- Run current Python, JavaScript, Go and Rust files
+- Git branch/status, stage, discard, diff, commit, pull and push workflows
+- Environment health view for Python, Git, Go, Rust and clangd
+- Persistent recent projects, theme, workspace and open files
+- Consolidated generic LSP Manager; removed the duplicate Python-only client
+- Existing DAP debugging, Markdown preview, split editors and Monaco editing retained
 
-## Language Intelligence view
-Use the new `{ }` activity-bar entry to see which language servers PeaBox detects. Python/Pyright is bundled. External servers are started on demand when a matching source file is opened.
+## Source development
+Contributors need Node.js and npm only for source development and packaging:
 
-## Check your machine
-Run `check-language-servers.bat` to see whether `gopls`, `rust-analyzer` and `clangd` are callable from PATH. Missing servers do not prevent PeaBox from running.
+```bat
+run-from-source.bat
+```
 
-## Existing features retained
-Python DAP debugging, breakpoints, call stack, variables, watches, Debug Console, visual Git diff, Source Control, split editors, project dashboard, run profiles, Markdown preview, themes, terminal and menu bar.
+Build the portable Windows release with:
 
-## Install
-Run `setup-peabox-ide.bat`; later use `run-peabox-ide.bat`.
+```bat
+build-release.bat
+```
+
+The generated end-user artifacts are placed in `dist`.
+
+## Optional developer tools
+PeaBox itself launches without these tools. Individual workflows may use Python, Git, Go, Rust, debugpy, gopls, rust-analyzer or clangd. The Environment view shows what is available.
