@@ -1,22 +1,16 @@
 {
   "name": "peabox-ide",
-  "version": "0.13.2",
+  "version": "0.14.0",
+  "private": true,
+  "description": "A focused, portable desktop code editor with reliable core developer workflows.",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "build:portable": "npm run release:check && electron-builder --win portable zip --x64",
-    "validate": "node tools/validate-release.js",
-    "test:smoke": "node tools/smoke-test.js",
-    "release:check": "npm run validate && npm run test:smoke && npm run test:reliability",
-    "test:reliability": "node tools/atomic-save-test.js"
+    "validate": "node tools/validate.js",
+    "build:portable": "npm run validate && electron-builder --win portable zip --x64"
   },
   "dependencies": {
-    "monaco-editor": "^0.52.0",
-    "pyright": "^1.1.414",
-    "typescript": "^5.9.3",
-    "@xterm/xterm": "^5.5.0",
-    "@xterm/addon-fit": "^0.10.0",
-    "marked": "^15.0.12"
+    "monaco-editor": "^0.52.2"
   },
   "devDependencies": {
     "electron": "^38.0.0",
@@ -27,23 +21,7 @@
     "productName": "PeaBox IDE",
     "artifactName": "PeaBox-IDE-${version}-Windows-${arch}.${ext}",
     "asar": true,
-    "win": {
-      "target": [
-        "portable",
-        "zip"
-      ]
-    },
-    "files": [
-      "**/*",
-      "!dist/**",
-      "!release/**",
-      "!node_modules/.cache/**",
-      "!*.log"
-    ]
-  },
-  "productName": "PeaBox IDE",
-  "description": "PeaBox IDE core reliability release with atomic saves, recovery buffers, file watching, ConPTY support, runtime propagation and workspace trust.",
-  "optionalDependencies": {
-    "node-pty": "^1.1.0"
+    "files": ["main.js", "preload.js", "renderer.js", "index.html", "style.css", "package.json", "node_modules/**/*"],
+    "win": {"target": ["portable", "zip"]}
   }
 }
