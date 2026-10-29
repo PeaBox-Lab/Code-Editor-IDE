@@ -1,8 +1,8 @@
 {
   "name": "peabox-ide",
-  "version": "0.14.1",
+  "version": "0.14.2",
   "private": true,
-  "description": "PeaBox IDE working core with a real ConPTY terminal and automated Electron feature tests.",
+  "description": "Completed working core with tested terminal, runtime selection, Git workflows, lazy Explorer, file watching and recovery.",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
