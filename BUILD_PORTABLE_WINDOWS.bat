@@ -1,7 +1,7 @@
 @echo off
 setlocal EnableExtensions
 cd /d "%~dp0"
-title PeaBox IDE v0.13.1 Portable Build
+title PeaBox IDE v0.13.2 Portable Build
 set "LOG=%~dp0portable-build.log"
 echo Build started %DATE% %TIME%>"%LOG%"
 set "NODEDIR="

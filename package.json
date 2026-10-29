@@ -1,13 +1,14 @@
 {
   "name": "peabox-ide",
-  "version": "0.13.1",
+  "version": "0.13.2",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
     "build:portable": "npm run release:check && electron-builder --win portable zip --x64",
     "validate": "node tools/validate-release.js",
     "test:smoke": "node tools/smoke-test.js",
-    "release:check": "npm run validate && npm run test:smoke"
+    "release:check": "npm run validate && npm run test:smoke && npm run test:reliability",
+    "test:reliability": "node tools/atomic-save-test.js"
   },
   "dependencies": {
     "monaco-editor": "^0.52.0",
@@ -41,5 +42,8 @@
     ]
   },
   "productName": "PeaBox IDE",
-  "description": "PeaBox IDE stabilization release with safe startup, recovery, diagnostics, verified portable builds, and core regression checks."
+  "description": "PeaBox IDE core reliability release with atomic saves, recovery buffers, file watching, ConPTY support, runtime propagation and workspace trust.",
+  "optionalDependencies": {
+    "node-pty": "^1.1.0"
+  }
 }

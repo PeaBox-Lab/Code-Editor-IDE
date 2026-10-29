@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.13.2
+
+- Added atomic saves and backup files.
+- Added unsaved-buffer recovery snapshots.
+- Added external file watching and conflict prompts.
+- Added workspace trust and Restricted Mode.
+- Added explicit runtime execution for current files.
+- Added optional node-pty/ConPTY terminal backend.
+- Added binary and large-file safety checks.
+
+# Changelog
+
 ## 0.13.1
 
 - Added safe session recovery, diagnostics and log access.
