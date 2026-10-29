@@ -1,27 +1,49 @@
 {
   "name": "peabox-ide",
-  "version": "0.14.0",
+  "version": "0.14.1",
   "private": true,
-  "description": "A focused, portable desktop code editor with reliable core developer workflows.",
+  "description": "PeaBox IDE working core with a real ConPTY terminal and automated Electron feature tests.",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
     "validate": "node tools/validate.js",
-    "build:portable": "npm run validate && electron-builder --win portable zip --x64"
+    "build:portable": "npm run validate && npm run test:unit && electron-builder --win portable zip --x64",
+    "test:e2e": "node tests/electron.spec.js",
+    "test:unit": "node tools/core-tests.js",
+    "test": "npm run validate && npm run test:unit && npm run test:e2e"
   },
   "dependencies": {
-    "monaco-editor": "^0.52.2"
+    "monaco-editor": "^0.52.2",
+    "@xterm/xterm": "^5.5.0",
+    "@xterm/addon-fit": "^0.10.0",
+    "node-pty": "^1.1.0",
+    "write-file-atomic": "^6.0.0"
   },
   "devDependencies": {
     "electron": "^38.0.0",
-    "electron-builder": "^26.0.12"
+    "electron-builder": "^26.0.12",
+    "playwright": "^1.56.0"
   },
   "build": {
     "appId": "com.peabox.ide",
     "productName": "PeaBox IDE",
     "artifactName": "PeaBox-IDE-${version}-Windows-${arch}.${ext}",
     "asar": true,
-    "files": ["main.js", "preload.js", "renderer.js", "index.html", "style.css", "package.json", "node_modules/**/*"],
-    "win": {"target": ["portable", "zip"]}
+    "files": [
+      "main.js",
+      "preload.js",
+      "renderer.js",
+      "index.html",
+      "style.css",
+      "package.json",
+      "node_modules/**/*",
+      "!node_modules/.cache/**"
+    ],
+    "win": {
+      "target": [
+        "portable",
+        "zip"
+      ]
+    }
   }
 }

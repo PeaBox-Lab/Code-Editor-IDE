@@ -1,13 +1,14 @@
 const {app,BrowserWindow,ipcMain,dialog,Menu,shell,clipboard}=require('electron');
-const fs=require('fs'),path=require('path'),{spawn}=require('child_process');
-let win=null,runner=null;
+const fs=require('fs'),path=require('path'),os=require('os'),{spawn}=require('child_process'),writeFileAtomic=require('write-file-atomic');
+let win=null,runner=null,ptyProcess=null;
 if(process.env.PORTABLE_EXECUTABLE_DIR) app.setPath('userData',path.join(process.env.PORTABLE_EXECUTABLE_DIR,'PeaBox-IDE-Data'));
 const stateFile=()=>path.join(app.getPath('userData'),'state.json');
 function safePath(p){if(typeof p!=='string'||!path.isAbsolute(p))throw new Error('Invalid absolute path');return path.normalize(p)}
 function readState(){try{return JSON.parse(fs.readFileSync(stateFile(),'utf8'))}catch{return{recent:[],lastFolder:null,openFiles:[],activeFile:null,settings:{theme:'dark',fontSize:14,autoSave:false}}}}
 function writeState(x){fs.mkdirSync(path.dirname(stateFile()),{recursive:true});fs.writeFileSync(stateFile(),JSON.stringify(x,null,2));return true}
 function tree(root){root=safePath(root);function walk(dir){let items=[];for(const e of fs.readdirSync(dir,{withFileTypes:true})){if(['node_modules','.git','dist','.venv','__pycache__'].includes(e.name))continue;let p=path.join(dir,e.name);try{items.push(e.isDirectory()?{name:e.name,path:p,dir:true,children:walk(p)}:{name:e.name,path:p,dir:false})}catch{}}return items.sort((a,b)=>Number(b.dir)-Number(a.dir)||a.name.localeCompare(b.name))}return{root,children:walk(root)}}
-function atomicWrite(file,content){file=safePath(file);let dir=path.dirname(file),tmp=path.join(dir,`.${path.basename(file)}.${process.pid}.tmp`);fs.writeFileSync(tmp,String(content),'utf8');let fd=fs.openSync(tmp,'r');try{fs.fsyncSync(fd)}finally{fs.closeSync(fd)}fs.renameSync(tmp,file);return{mtime:fs.statSync(file).mtimeMs}}
+function atomicWrite(file,content){file=safePath(file);writeFileAtomic.sync(file,String(content),{encoding:'utf8',fsync:true});return{mtime:fs.statSync(file).mtimeMs}}
+function quietRun(cwd,command){return new Promise(resolve=>{let p=spawn(command,{cwd,shell:true,windowsHide:true}),text='';p.stdout.on('data',d=>text+=d);p.stderr.on('data',d=>text+=d);p.on('error',e=>resolve({code:1,text:e.message}));p.on('close',code=>resolve({code:code??0,text}))})}
 function run(cwd,command){return new Promise(resolve=>{if(runner)return resolve({code:1,text:'Another command is already running.'});runner=spawn(command,{cwd,shell:true,windowsHide:true});let text='';runner.stdout.on('data',d=>{text+=d;win.webContents.send('command:output',d.toString())});runner.stderr.on('data',d=>{text+=d;win.webContents.send('command:output',d.toString())});runner.on('error',e=>{runner=null;resolve({code:1,text:e.message})});runner.on('close',code=>{runner=null;win.webContents.send('command:exit',code);resolve({code:code??0,text})})})}
 function send(command,arg){win?.webContents.send('menu',command,arg)}
 function installMenu(){Menu.setApplicationMenu(Menu.buildFromTemplate([
@@ -15,7 +16,7 @@ function installMenu(){Menu.setApplicationMenu(Menu.buildFromTemplate([
  {label:'Edit',submenu:[{role:'undo'},{role:'redo'},{type:'separator'},{role:'cut'},{role:'copy'},{role:'paste'},{role:'selectAll'},{type:'separator'},{label:'Find',accelerator:'CmdOrCtrl+F',click:()=>send('find')},{label:'Replace',accelerator:'CmdOrCtrl+H',click:()=>send('replace')},{label:'Find in Files',accelerator:'CmdOrCtrl+Shift+F',click:()=>send('search')}]},
  {label:'View',submenu:[{label:'Explorer',accelerator:'CmdOrCtrl+Shift+E',click:()=>send('explorer')},{label:'Search',accelerator:'CmdOrCtrl+Shift+F',click:()=>send('search')},{label:'Source Control',accelerator:'CmdOrCtrl+Shift+G',click:()=>send('git')},{label:'Output',accelerator:'CmdOrCtrl+J',click:()=>send('output')},{type:'separator'},{role:'reload'},{role:'togglefullscreen'},{role:'zoomIn'},{role:'zoomOut'},{role:'resetZoom'}]},
  {label:'Run',submenu:[{label:'Run Current File',accelerator:'F5',click:()=>send('run')},{label:'Stop',accelerator:'Shift+F5',click:()=>send('stop')}]},
- {label:'Help',submenu:[{label:'About PeaBox IDE',click:()=>dialog.showMessageBox(win,{type:'info',message:'PeaBox IDE 0.14.0',detail:'Reliable Core Edition'})}]}
+ {label:'Help',submenu:[{label:'About PeaBox IDE',click:()=>dialog.showMessageBox(win,{type:'info',message:'PeaBox IDE 0.14.1',detail:'Reliable Core Edition'})}]}
  ]))}
 function create(){installMenu();win=new BrowserWindow({width:1400,height:880,minWidth:900,minHeight:600,backgroundColor:'#10131a',webPreferences:{preload:path.join(__dirname,'preload.js'),contextIsolation:true,nodeIntegration:false,sandbox:false}});win.loadFile('index.html')}
 app.whenReady().then(create);app.on('window-all-closed',()=>{if(process.platform!=='darwin')app.quit()});
@@ -27,8 +28,15 @@ ipcMain.handle('file:new',async(_,root)=>{let r=await dialog.showSaveDialog(win,
 ipcMain.handle('file:rename',(_,p,n)=>{let q=path.join(path.dirname(safePath(p)),n);fs.renameSync(p,q);return q});
 ipcMain.handle('file:delete',async(_,p)=>{let r=await dialog.showMessageBox(win,{type:'warning',buttons:['Cancel','Delete'],defaultId:0,message:'Delete this item?',detail:p});if(r.response!==1)return false;fs.rmSync(safePath(p),{recursive:true,force:true});return true});
 ipcMain.handle('search:project',(_,root,q)=>{let hits=[];q=String(q).toLowerCase();function scan(dir){for(const e of fs.readdirSync(dir,{withFileTypes:true})){if(['node_modules','.git','dist','.venv','__pycache__'].includes(e.name))continue;let p=path.join(dir,e.name);if(e.isDirectory())scan(p);else if(hits.length<500){try{if(fs.statSync(p).size>1024*1024)continue;fs.readFileSync(p,'utf8').split(/\r?\n/).forEach((line,i)=>{if(hits.length<500&&line.toLowerCase().includes(q))hits.push({path:p,line:i+1,text:line.trim().slice(0,180)})})}catch{}}}}if(q)scan(safePath(root));return hits});
-ipcMain.handle('git:status',(_,cwd)=>run(cwd,'git status --short --branch'));ipcMain.handle('git:diff',(_,cwd,file)=>run(cwd,`git diff -- "${file||''}"`));ipcMain.handle('git:stage',(_,cwd,file)=>run(cwd,`git add -- "${file}"`));ipcMain.handle('git:commit',(_,cwd,msg)=>run(cwd,`git commit -m "${String(msg).replaceAll('"','\\"')}"`));
+ipcMain.handle('git:status',(_,cwd)=>quietRun(cwd,'git status --short --branch'));ipcMain.handle('git:diff',(_,cwd,file)=>quietRun(cwd,`git diff -- \"${file||''}\"`));ipcMain.handle('git:stage',(_,cwd,file)=>quietRun(cwd,`git add -- \"${file}\"`));ipcMain.handle('git:commit',(_,cwd,msg)=>quietRun(cwd,`git commit -m \"${String(msg).replaceAll('\"','\\\"')}\"`));
 ipcMain.handle('command:run',(_,cwd,c)=>run(cwd,c));ipcMain.handle('command:stop',()=>{if(runner){runner.kill();runner=null}return true});
+
+function defaultShell(){if(process.platform==='win32')return process.env.COMSPEC&&/cmd\.exe$/i.test(process.env.COMSPEC)?'powershell.exe':'powershell.exe';return process.env.SHELL||'/bin/bash'}
+ipcMain.handle('terminal:start',(_,cwd,shellPath)=>{try{if(ptyProcess){try{ptyProcess.kill()}catch{};ptyProcess=null}let pty=require('node-pty'),shell=shellPath||defaultShell(),args=process.platform==='win32'?['-NoLogo']:[];ptyProcess=pty.spawn(shell,args,{name:'xterm-256color',cols:100,rows:30,cwd:cwd&&fs.existsSync(cwd)?cwd:app.getPath('home'),env:process.env,useConpty:process.platform==='win32'});ptyProcess.onData(data=>win.webContents.send('terminal:data',data));ptyProcess.onExit(e=>{win.webContents.send('terminal:exit',e.exitCode);ptyProcess=null});return{ok:true,shell,conpty:process.platform==='win32'}}catch(e){return{ok:false,error:e.message}}});
+ipcMain.on('terminal:input',(_,data)=>{try{ptyProcess?.write(String(data))}catch{}});ipcMain.on('terminal:resize',(_,cols,rows)=>{try{ptyProcess?.resize(Math.max(2,cols|0),Math.max(1,rows|0))}catch{}});ipcMain.handle('terminal:stop',()=>{try{ptyProcess?.kill()}catch{}ptyProcess=null;return true});
+
 ipcMain.handle('state:load',()=>readState());ipcMain.handle('state:save',(_,x)=>writeState(x));
 ipcMain.handle('shell:reveal',(_,p)=>shell.showItemInFolder(safePath(p)));ipcMain.handle('clipboard:write',(_,t)=>clipboard.writeText(String(t)));
 ipcMain.on('file:menu',(_,p)=>Menu.buildFromTemplate([{label:'Open',click:()=>send('openPath',p)},{label:'Rename',click:()=>send('renamePath',p)},{label:'Delete',click:()=>send('deletePath',p)},{type:'separator'},{label:'Copy Path',click:()=>clipboard.writeText(p)},{label:'Reveal in Explorer',click:()=>shell.showItemInFolder(p)}]).popup({window:win}));
+
+app.on('before-quit',()=>{try{ptyProcess?.kill()}catch{}});

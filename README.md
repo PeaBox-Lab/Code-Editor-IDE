@@ -1,34 +1,31 @@
-# PeaBox IDE v0.14.0 - Reliable Core Rebuild
+# PeaBox IDE v0.14.1 - Tested Core + Real Terminal
 
-This release is a clean rebuild. It deliberately removes unfinished LSP, DAP, testing, task, workspace-trust and recovery interfaces from the visible product until they are implemented and tested end to end.
+This release audits the v0.14 working core, fixes the identified workflows, adds automated Electron tests, and introduces a real interactive terminal.
 
-## Working scope
+## Real terminal
 
-- Open and refresh a project folder
-- Collapsible Explorer
-- Create, rename and delete files
-- Multi-tab Monaco editor
-- Syntax highlighting for common languages
-- Atomic file save
-- Save All and dirty-file warnings
-- Project-wide text search
-- Run current Python, JavaScript or Go file
-- Command output and process stop
-- Git status, stage and commit
-- Light/dark theme
-- Font size and Auto Save
-- Recent projects and session restoration
-- Native desktop menu and keyboard shortcuts
-- Portable Windows EXE/ZIP build
+The terminal uses `xterm.js` in the renderer and `node-pty` in the Electron main process. On Windows, node-pty uses ConPTY on Windows 10 version 1809 and later. It supports interactive PowerShell input, command history, Ctrl+C, REPLs and terminal resize.
 
-## Source run
+Open it using `Ctrl+`` or **View > Output**, then select **Terminal**.
 
-Double-click `START_SOURCE.bat`.
+## Automated tests
 
-## Portable Windows build
+Run:
 
-Double-click `BUILD_WINDOWS.bat`, or run the GitHub Actions workflow. End users of the resulting EXE do not need Node.js or npm.
+```text
+npm test
+```
 
-## Design rule
+The Playwright Electron test covers application launch, project opening, Monaco initialization, file opening, project search, theme switching and terminal startup. Core tests verify atomic save behavior and required dependencies.
 
-A feature is not shown in PeaBox unless its main workflow is wired and validated. Advanced language intelligence, debugging and testing will return incrementally after automated Electron tests are added.
+## Audit
+
+See `AUDIT.md` for broken v0.14 workflows fixed here and remaining intentional limitations.
+
+## Build
+
+- Source: `START_SOURCE.bat`
+- Windows portable: `BUILD_WINDOWS.bat`
+- CI: `.github/workflows/windows.yml`
+
+End users of the packaged EXE do not need Node.js, npm, Python, or administrator access to launch the editor. Language runtimes are only needed when running code in those languages.

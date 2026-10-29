@@ -9,6 +9,8 @@ jobs:
         with: {node-version: '22', cache: npm}
       - run: npm install --no-audit --no-fund
       - run: npm run validate
+      - run: npm run test:unit
+      - run: npm run test:e2e
       - run: npm run build:portable
         env: {CSC_IDENTITY_AUTO_DISCOVERY: 'false'}
       - uses: actions/upload-artifact@v4
