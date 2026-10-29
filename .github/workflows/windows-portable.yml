@@ -1,58 +1,40 @@
-name: Build Windows Portable
-
+name: Build and verify Windows portable
 on:
   workflow_dispatch:
   push:
-    tags:
-      - 'v*'
-
+    tags: ["v*"]
 permissions:
   contents: write
-
 jobs:
-  build-windows:
+  build:
     runs-on: windows-latest
     timeout-minutes: 30
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: "22"
           cache: npm
-
-      - name: Install dependencies
-        shell: pwsh
-        run: npm install --no-audit --no-fund
-
-      - name: Static validation
-        shell: pwsh
-        run: |
-          node --check main.js
-          node --check preload.js
-          node --check renderer.js
-
-      - name: Build Windows portable EXE and ZIP
-        shell: pwsh
+      - run: npm install --no-audit --no-fund
+      - run: npm run release:check
+      - name: Build portable EXE and ZIP
         env:
-          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
         run: npm run build:portable
-
-      - name: Upload portable artifacts
-        uses: actions/upload-artifact@v4
+      - name: Generate checksums
+        shell: pwsh
+        run: Get-FileHash dist\* -Algorithm SHA256 | Format-Table -AutoSize | Out-File dist\SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
         with:
-          name: PeaBox-IDE-v0.13.0-Windows-x64
+          name: PeaBox-IDE-v0.13.1-Windows-x64
           path: |
             dist/*.exe
             dist/*.zip
-          if-no-files-found: error
-
-      - name: Publish tagged release assets
-        if: startsWith(github.ref, 'refs/tags/')
+            dist/SHA256SUMS.txt
+      - if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
           files: |
             dist/*.exe
             dist/*.zip
+            dist/SHA256SUMS.txt

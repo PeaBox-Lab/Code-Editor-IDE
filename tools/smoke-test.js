@@ -1,0 +1,1 @@
+const{spawnSync}=require('child_process');for(const f of ['main.js','preload.js','renderer.js']){let r=spawnSync(process.execPath,['--check',f],{encoding:'utf8'});if(r.status){console.error(r.stderr);process.exit(r.status)}}console.log('Static smoke tests passed');

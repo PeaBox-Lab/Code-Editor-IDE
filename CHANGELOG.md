@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.13.1
+
+- Added safe session recovery, diagnostics and log access.
+- Added reset-state capability.
+- Added portable-state handling.
+- Added release validation and smoke tests.
+- Added verified Windows GitHub Actions release workflow.
+- Added SHA-256 checksum generation.
+
+# Changelog
+
 ## 0.13.0
 
 - Added Testing view for pytest and Node scripts.

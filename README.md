@@ -1,42 +1,24 @@
-# PeaBox IDE v0.13 - Everyday Developer Workflow
+# PeaBox IDE v0.13.1 - Portable Stabilization
 
-## New in v0.13
-- Test Explorer for Python `pytest` and Node package test scripts
-- Discover, run one, or run all tests
-- Test output and pass/fail status
-- Project Tasks view backed by `.peabox/project.json`
-- Built-in task editor using `Name = command` lines
-- Runtime and editor Settings dialog
-- Auto-save preference, theme and font size
-- Portable Python and Git executable path settings
-- Improved project test-provider detection
-- Static `SMOKE_TEST.bat` for source validation
+This release hardens startup, session recovery, diagnostics and the Windows portable release pipeline.
 
 ## End users
-Use the packaged Windows ZIP and run `PeaBox IDE.exe`. The packaged release does not require Node.js, npm, or administrator rights.
+Download the Windows ZIP or portable EXE from GitHub Releases. Extract if required and run `PeaBox IDE.exe`. The packaged release does not require Node.js, npm, administrator rights, or installation.
 
-## Source mode
-Double-click `START_PEABOX_IDE.bat`. It uses portable Node from a local `node` folder or the previously supported helper path. Startup details are written to `peabox-startup.log`.
+## New in v0.13.1
+- Interrupted-session detection and safe recovery banner
+- Workspace restoration paused after an unclean shutdown
+- Reset IDE state action
+- Built-in diagnostics report with platform, Electron runtime and detected developer tools
+- Access to PeaBox logs from the Environment view
+- Portable state stored beside the portable executable
+- Release validation checking required files, DOM references and preload APIs
+- Static smoke tests for all JavaScript entry points
+- GitHub Actions Windows build for portable EXE, ZIP and SHA-256 checksums
+- Local `BUILD_PORTABLE_WINDOWS.bat` with log output
 
-## Project tasks
-Open **Tasks**, choose the gear button, and enter one task per line:
+## Build on Windows
+Run `BUILD_PORTABLE_WINDOWS.bat`. Output appears in `dist`.
 
-```text
-Run app = python app.py
-Tests = python -m pytest
-Install = python -m pip install -r requirements.txt
-```
-
-Tasks are saved in `.peabox/project.json`. Only run commands from projects you trust.
-
-## Testing
-Python projects use `python -m pytest`; install pytest in the selected environment. Node projects use test-related scripts from `package.json`.
-
-## Build the portable Windows release
-
-The repository includes two supported build routes:
-
-- GitHub Actions: `.github/workflows/windows-portable.yml`
-- Local Windows: `BUILD_WINDOWS_PORTABLE.bat`
-
-See `PORTABLE_RELEASE.md`. The generated EXE is for end users and does not require Node.js or npm.
+## Build on GitHub
+Run the **Build and verify Windows portable** workflow, or push tag `v0.13.1`.

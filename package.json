@@ -1,10 +1,13 @@
 {
   "name": "peabox-ide",
-  "version": "0.13.0",
+  "version": "0.13.1",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "build:portable": "electron-builder --win portable zip --x64"
+    "build:portable": "npm run release:check && electron-builder --win portable zip --x64",
+    "validate": "node tools/validate-release.js",
+    "test:smoke": "node tools/smoke-test.js",
+    "release:check": "npm run validate && npm run test:smoke"
   },
   "dependencies": {
     "monaco-editor": "^0.52.0",
@@ -32,10 +35,11 @@
     "files": [
       "**/*",
       "!dist/**",
-      "!*.bat",
-      "!package-lock.json"
+      "!release/**",
+      "!node_modules/.cache/**",
+      "!*.log"
     ]
   },
   "productName": "PeaBox IDE",
-  "description": "A portable developer IDE with testing, tasks, runtime management, LSP, DAP, Git and Monaco."
+  "description": "PeaBox IDE stabilization release with safe startup, recovery, diagnostics, verified portable builds, and core regression checks."
 }
