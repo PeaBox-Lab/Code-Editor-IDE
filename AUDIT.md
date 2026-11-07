@@ -1,5 +1,5 @@
-# v0.14.2 Audit Closure
+# v0.14.3 Capability Gate
 
-Fixed: runtime paths, Git unstage/discard/branches/pull/push/stash, lazy Explorer, file watching, recovery, and interactive terminal.
+Python analysis was restored because its complete user workflow is implemented and testable: invoke Pyright, parse JSON diagnostics, render Problems, navigate to source, and verify a known type error in automation.
 
-Remaining: merge editor, LSP, DAP, and Test Explorer are intentionally withheld until covered by end-to-end tests.
+Not yet restored: live LSP completion, debugger, Test Explorer, extension platform, or multi-root workspaces.

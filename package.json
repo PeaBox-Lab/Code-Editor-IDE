@@ -1,23 +1,25 @@
 {
   "name": "peabox-ide",
-  "version": "0.14.2",
+  "version": "0.14.3",
   "private": true,
-  "description": "Completed working core with tested terminal, runtime selection, Git workflows, lazy Explorer, file watching and recovery.",
+  "description": "PeaBox IDE working core with bundled Python analysis, Problems panel, outline and tested navigation.",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
     "validate": "node tools/validate.js",
-    "build:portable": "npm run validate && npm run test:unit && electron-builder --win portable zip --x64",
+    "build:portable": "npm run validate && npm run test:unit && npm run test:analysis && electron-builder --win portable zip --x64",
     "test:e2e": "node tests/electron.spec.js",
     "test:unit": "node tools/core-tests.js",
-    "test": "npm run validate && npm run test:unit && npm run test:e2e"
+    "test": "npm run validate && npm run test:unit && npm run test:analysis && npm run test:e2e",
+    "test:analysis": "node tools/python-analysis-test.js"
   },
   "dependencies": {
     "monaco-editor": "^0.52.2",
     "@xterm/xterm": "^5.5.0",
     "@xterm/addon-fit": "^0.10.0",
     "node-pty": "^1.1.0",
-    "write-file-atomic": "^6.0.0"
+    "write-file-atomic": "^6.0.0",
+    "pyright": "^1.1.414"
   },
   "devDependencies": {
     "electron": "^38.0.0",
