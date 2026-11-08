@@ -1,25 +1,31 @@
 {
   "name": "peabox-ide",
-  "version": "0.14.3",
+  "version": "0.15.0",
   "private": true,
-  "description": "PeaBox IDE working core with bundled Python analysis, Problems panel, outline and tested navigation.",
+  "description": "A fast, local-first desktop code editor with a lazy explorer, async search, Git integration, runtimes, terminals and crash recovery.",
   "main": "main.js",
+  "author": "PeaBox",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20.0.0",
+    "npm": ">=10.0.0"
+  },
   "scripts": {
     "start": "electron .",
     "validate": "node tools/validate.js",
-    "build:portable": "npm run validate && npm run test:unit && npm run test:analysis && electron-builder --win portable zip --x64",
+    "test": "npm run validate && npm run test:unit",
+    "test:unit": "node --test tests/unit.test.js",
     "test:e2e": "node tests/electron.spec.js",
-    "test:unit": "node tools/core-tests.js",
-    "test": "npm run validate && npm run test:unit && npm run test:analysis && npm run test:e2e",
-    "test:analysis": "node tools/python-analysis-test.js"
+    "build": "npm run validate && npm run test:unit && electron-builder --win portable zip --x64",
+    "build:portable": "npm run build",
+    "postinstall": "node tools/postinstall.js"
   },
   "dependencies": {
-    "monaco-editor": "^0.52.2",
-    "@xterm/xterm": "^5.5.0",
     "@xterm/addon-fit": "^0.10.0",
+    "@xterm/xterm": "^5.5.0",
+    "monaco-editor": "^0.52.2",
     "node-pty": "^1.1.0",
-    "write-file-atomic": "^6.0.0",
-    "pyright": "^1.1.414"
+    "write-file-atomic": "^6.0.0"
   },
   "devDependencies": {
     "electron": "^38.0.0",
@@ -31,15 +37,21 @@
     "productName": "PeaBox IDE",
     "artifactName": "PeaBox-IDE-${version}-Windows-${arch}.${ext}",
     "asar": true,
+    "npmRebuild": false,
+    "asarUnpack": [
+      "node_modules/node-pty/**/*"
+    ],
     "files": [
       "main.js",
       "preload.js",
       "renderer.js",
+      "shared.js",
       "index.html",
       "style.css",
       "package.json",
       "node_modules/**/*",
-      "!node_modules/.cache/**"
+      "!node_modules/.cache/**",
+      "!**/*.map"
     ],
     "win": {
       "target": [

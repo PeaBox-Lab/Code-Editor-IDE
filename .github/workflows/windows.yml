@@ -1,19 +1,41 @@
-name: Build PeaBox IDE Windows
-on: [workflow_dispatch]
+name: Build PeaBox IDE (Windows)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+  pull_request:
+
 jobs:
   build:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-node@v4
-        with: {node-version: '22', cache: npm}
-      - run: npm install --no-audit --no-fund
-      - run: npm run validate
-      - run: npm run test:unit
-      - run: npm run test:e2e
-      - run: npm run build:portable
-        env: {CSC_IDENTITY_AUTO_DISCOVERY: 'false'}
-      - uses: actions/upload-artifact@v4
         with:
-          name: PeaBox-IDE-v0.14.0-Windows-x64
+          node-version: '22'
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Static validation
+        run: npm run validate
+
+      - name: Unit tests
+        run: npm run test:unit
+
+      - name: End-to-end tests
+        run: npm run test:e2e
+
+      - name: Build portable + zip
+        run: npm run build
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: PeaBox-IDE-Windows-x64
           path: dist/*
+          if-no-files-found: error

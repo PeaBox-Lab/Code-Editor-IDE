@@ -1,1 +1,96 @@
-const{contextBridge,ipcRenderer}=require('electron');const call=(c,...a)=>ipcRenderer.invoke(c,...a);contextBridge.exposeInMainWorld('api',{terminalStart:(r,s)=>call('terminal:start',r,s),terminalStop:()=>call('terminal:stop'),terminalInput:d=>ipcRenderer.send('terminal:input',d),terminalResize:(c,r)=>ipcRenderer.send('terminal:resize',c,r),onTerminalData:f=>ipcRenderer.on('terminal:data',(_,x)=>f(x)),onTerminalExit:f=>ipcRenderer.on('terminal:exit',(_,x)=>f(x)),chooseFolder:()=>call('folder:choose'),pythonAnalyze:(r,f)=>call('python:analyze',r,f),pythonOutline:f=>call('python:outline',f),folderChildren:p=>call('folder:children',p),recoverySave:(p,c)=>call('recovery:save',p,c),recoveryClear:p=>call('recovery:clear',p),recoveryList:()=>call('recovery:list'),watchStart:p=>call('watch:start',p),watchStop:p=>call('watch:stop',p),onFileChanged:f=>ipcRenderer.on('file:changed',(_,x)=>f(x)),runtimeChoose:()=>call('runtime:choose'),runtimeRun:(r,e,a)=>call('runtime:run',r,e,a),gitUnstage:(r,f)=>call('git:unstage',r,f),gitDiscard:(r,f)=>call('git:discard',r,f),gitStageAll:r=>call('git:stage-all',r),gitBranches:r=>call('git:branches',r),gitSwitch:(r,b)=>call('git:switch',r,b),gitCreateBranch:(r,b)=>call('git:create-branch',r,b),gitPull:r=>call('git:pull',r),gitPush:r=>call('git:push',r),gitStash:r=>call('git:stash',r),gitStashPop:r=>call('git:stash-pop',r),loadFolder:p=>call('folder:load',p),refreshFolder:p=>call('folder:refresh',p),readFile:p=>call('file:read',p),writeFile:(p,c)=>call('file:write',p,c),newFile:r=>call('file:new',r),renameFile:(p,n)=>call('file:rename',p,n),deleteFile:p=>call('file:delete',p),search:(r,q)=>call('search:project',r,q),gitStatus:r=>call('git:status',r),gitDiff:(r,f)=>call('git:diff',r,f),gitStage:(r,f)=>call('git:stage',r,f),gitCommit:(r,m)=>call('git:commit',r,m),run:(r,c)=>call('command:run',r,c),stop:()=>call('command:stop'),loadState:()=>call('state:load'),saveState:s=>call('state:save',s),reveal:p=>call('shell:reveal',p),copy:t=>call('clipboard:write',t),fileMenu:p=>ipcRenderer.send('file:menu',p),onMenu:f=>ipcRenderer.on('menu',(_,c,a)=>f(c,a)),onOutput:f=>ipcRenderer.on('command:output',(_,x)=>f(x)),onExit:f=>ipcRenderer.on('command:exit',(_,x)=>f(x))});
+'use strict';
+const { contextBridge, ipcRenderer } = require('electron');
+
+const invoke = (channel, ...args) => ipcRenderer.invoke(channel, ...args);
+const send = (channel, payload) => ipcRenderer.send(channel, payload);
+
+function subscribe(channel, callback) {
+  const handler = (_event, payload) => callback(payload);
+  ipcRenderer.on(channel, handler);
+  return () => ipcRenderer.removeListener(channel, handler);
+}
+
+contextBridge.exposeInMainWorld('api', {
+  app: {
+    info: () => invoke('app:info'),
+    loadState: () => invoke('app:loadState'),
+    saveState: (state) => invoke('app:saveState', state),
+    copy: (text) => invoke('app:copy', text),
+    close: (action) => invoke('app:close', action)
+  },
+
+  workspace: {
+    choose: () => invoke('workspace:choose'),
+    load: (dir) => invoke('workspace:load', dir),
+    refresh: (dir) => invoke('workspace:refresh', dir),
+    children: (dir) => invoke('workspace:children', dir),
+    files: (payload) => invoke('workspace:files', payload),
+    search: (payload) => invoke('workspace:search', payload),
+    watchStart: (dir) => invoke('workspace:watchStart', dir),
+    watchStop: () => invoke('workspace:watchStop'),
+    stat: (path) => invoke('workspace:stat', path),
+    createFile: (payload) => invoke('workspace:createFile', payload),
+    createFolder: (payload) => invoke('workspace:createFolder', payload)
+  },
+
+  file: {
+    read: (path) => invoke('file:read', path),
+    write: (path, content) => invoke('file:write', path, content),
+    newFile: (root) => invoke('file:new', root),
+    openDialog: () => invoke('dialog:file'),
+    rename: (path, name) => invoke('file:rename', path, name),
+    remove: (path) => invoke('file:delete', path),
+    reveal: (path) => invoke('file:reveal', path),
+    watchStart: (path) => invoke('watch:start', path),
+    watchStop: (path) => invoke('watch:stop', path)
+  },
+
+  git: {
+    status: (cwd) => invoke('git:status', cwd),
+    branches: (cwd) => invoke('git:branches', cwd),
+    diff: (payload) => invoke('git:diff', payload),
+    stage: (payload) => invoke('git:stage', payload),
+    unstage: (payload) => invoke('git:unstage', payload),
+    discard: (payload) => invoke('git:discard', payload),
+    stageAll: (cwd) => invoke('git:stageAll', cwd),
+    unstageAll: (cwd) => invoke('git:unstageAll', cwd),
+    commit: (payload) => invoke('git:commit', payload),
+    switchBranch: (payload) => invoke('git:switch', payload),
+    createBranch: (payload) => invoke('git:createBranch', payload),
+    pull: (cwd) => invoke('git:pull', cwd),
+    push: (cwd) => invoke('git:push', cwd),
+    stash: (cwd) => invoke('git:stash', cwd),
+    stashPop: (cwd) => invoke('git:stashPop', cwd)
+  },
+
+  run: {
+    start: (payload) => invoke('run:start', payload),
+    stop: () => invoke('run:stop'),
+    check: (exe) => invoke('run:check', exe)
+  },
+
+  terminal: {
+    create: (payload) => invoke('terminal:create', payload),
+    input: (payload) => send('terminal:input', payload),
+    resize: (payload) => send('terminal:resize', payload),
+    kill: (id) => invoke('terminal:kill', id)
+  },
+
+  recovery: {
+    list: () => invoke('recovery:list'),
+    read: (file) => invoke('recovery:read', file),
+    save: (payload) => invoke('recovery:save', payload),
+    clear: (file) => invoke('recovery:clear', file)
+  },
+
+  on: {
+    menu: (cb) => subscribe('menu:command', cb),
+    fileChanged: (cb) => subscribe('file:changed', cb),
+    workspaceChanged: (cb) => subscribe('workspace:changed', cb),
+    runOutput: (cb) => subscribe('run:output', cb),
+    runExit: (cb) => subscribe('run:exit', cb),
+    terminalData: (cb) => subscribe('terminal:data', cb),
+    terminalExit: (cb) => subscribe('terminal:exit', cb),
+    closeRequest: (cb) => subscribe('app:close-request', cb)
+  }
+});

@@ -1,1 +1,255 @@
-<!doctype html><html><head><meta charset="UTF-8"><title>PeaBox IDE</title><link rel="stylesheet" href="style.css"><link rel="stylesheet" href="./node_modules/@xterm/xterm/css/xterm.css"></head><body><header><div class="logo">P</div><b>PeaBox IDE</b><span id="workspace">No folder open</span><button id="openFolder">Open Folder</button><button id="saveBtn">Save</button><button id="runBtn" class="primary">▶ Run</button><button id="analyzeBtn" title="Analyze current Python file">✓ Analyze</button><button id="themeBtn" title="Switch theme">☀</button></header><div id="layout"><nav><button data-view="explorer" class="active" title="Explorer">▱</button><button data-view="search" title="Search">⌕</button><button data-view="git" title="Source Control">⑂</button><button data-view="problems" title="Problems">!</button><div></div><button data-view="settings" title="Settings">⚙</button></nav><aside><section id="explorerView"><div class="sidehead">EXPLORER <span><button id="newFile">＋</button><button id="refresh">↻</button></span></div><div id="tree" class="empty">Open a folder to begin.</div><div class="outlineBox"><div class="sidehead">OUTLINE <button id="outlineRefresh">↻</button></div><div id="outline"></div></div></section><section id="searchView" class="hidden"><div class="sidehead">SEARCH</div><div class="searchbar"><input id="searchInput" placeholder="Search files"><button id="searchBtn">Search</button></div><div id="searchResults"></div></section><section id="gitView" class="hidden"><div class="sidehead">SOURCE CONTROL <button id="gitRefresh">↻</button></div><select id="gitBranch"></select><div class="gitTools"><button id="gitNewBranch">New Branch</button><button id="gitStageAll">Stage All</button></div><textarea id="commitMessage" placeholder="Commit message"></textarea><button id="commitBtn" class="primary wide">Commit staged changes</button><div class="gitTools"><button id="gitPull">Pull</button><button id="gitPush">Push</button><button id="gitStash">Stash</button><button id="gitStashPop">Pop</button></div><div id="gitChanges"></div></section><section id="problemsView" class="hidden"><div class="sidehead">PROBLEMS <span><button id="analyzeFile">File</button><button id="analyzeProject">Project</button></span></div><div id="problemSummary" class="empty">Run Python analysis to see diagnostics.</div><div id="problems"></div></section><section id="settingsView" class="hidden"><div class="sidehead">SETTINGS</div><label><input type="checkbox" id="autoSave"> Auto Save</label><label>Font size<input type="number" id="fontSize" min="10" max="28"></label><label>Python<input id="pythonPath" placeholder="python"><button class="browseRuntime" data-runtime="python">Browse</button></label><label>Node<input id="nodePath" placeholder="node"><button class="browseRuntime" data-runtime="node">Browse</button></label><label>Go<input id="goPath" placeholder="go"><button class="browseRuntime" data-runtime="go">Browse</button></label><button id="saveSettings" class="wide">Save Settings</button></section></aside><main><div id="tabs"></div><div id="editor"></div><div id="conflictDialog" class="modal hidden"><div class="dialog"><h3>File changed outside PeaBox</h3><p id="conflictMessage"></p><button id="reloadFile">Reload</button><button id="keepFile">Keep editor</button></div></div><div id="recoveryDialog" class="modal hidden"><div class="dialog"><h3>Recover unsaved work</h3><div id="recoveryItems"></div><button id="closeRecovery">Close</button></div></div><div id="welcome"><div class="welcomeLogo">P</div><h1>PeaBox IDE</h1><p>A focused editor with reliable core workflows.</p><button id="welcomeOpen" class="primary">Open Project Folder</button><h3>Recent Projects</h3><div id="recent"></div></div><section id="bottom"><div class="panelbar"><button class="panelTab active" data-panel="terminalPane">TERMINAL</button><button class="panelTab" data-panel="outputPane">OUTPUT</button><span></span><button id="newTerminal">New Terminal</button><button id="clearOutput">Clear</button><button id="closeOutput">×</button></div><div id="terminalPane" class="panelPane"><div id="terminal"></div><div id="terminalError" class="terminalError hidden"></div></div><pre id="outputPane" class="panelPane hidden"><span id="output">Ready.</span></pre></section><footer><span id="status">Ready</span><span id="dirtyStatus"></span><span id="analysisStatus">Python: idle</span><span id="language">Plain Text</span><span id="position">Ln 1, Col 1</span></footer></main></div><script src="./node_modules/monaco-editor/min/vs/loader.js"></script><script src="./node_modules/@xterm/xterm/lib/xterm.js"></script><script src="./node_modules/@xterm/addon-fit/lib/addon-fit.js"></script><script src="renderer.js"></script></body></html>
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>PeaBox IDE</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="./node_modules/@xterm/xterm/css/xterm.css">
+</head>
+<body>
+  <svg class="sprite" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
+    <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 6a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/></symbol>
+    <symbol id="i-folder-open" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h5l2 2h6a2 2 0 0 1 2 2v1H7l-4 8V7Zm0 4h17l-4 8H5a2 2 0 0 1-2-2v-6Z"/></symbol>
+    <symbol id="i-file" viewBox="0 0 24 24"><path d="M6 3h8l4 4v14H6V3Zm8 1.5V8h3.5"/></symbol>
+    <symbol id="i-chevron-right" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7"/></symbol>
+    <symbol id="i-chevron-down" viewBox="0 0 24 24"><path d="m5 9 7 7 7-7"/></symbol>
+    <symbol id="i-close" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/></symbol>
+    <symbol id="i-branch" viewBox="0 0 24 24"><circle cx="6" cy="5" r="2.5"/><circle cx="6" cy="19" r="2.5"/><circle cx="18" cy="7" r="2.5"/><path d="M6 7.5v9M18 9.5c0 4-4 5-9.5 6"/></symbol>
+    <symbol id="i-settings" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2.8 2.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6v.2h-4V21a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1L4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9A1.7 1.7 0 0 0 3 14H2.8v-4H3a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9L4.2 7 7 4.2l.1.1A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-1.6v-.2h4V3a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1L19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.2v4H21a1.7 1.7 0 0 0-1.6 1Z"/></symbol>
+    <symbol id="i-play" viewBox="0 0 24 24"><path d="M8 5v14l11-7Z"/></symbol>
+    <symbol id="i-stop" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/></symbol>
+    <symbol id="i-terminal" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="m7 9 4 3-4 3M13 15h4"/></symbol>
+    <symbol id="i-output" viewBox="0 0 24 24"><path d="M4 5h16M4 10h10M4 15h16M4 20h8"/></symbol>
+    <symbol id="i-palette" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><circle cx="8.5" cy="9" r="1"/><circle cx="15.5" cy="9" r="1"/><circle cx="9" cy="15" r="1"/><path d="M12 21a4 4 0 0 1 0-8 3 3 0 0 0 0-6"/></symbol>
+    <symbol id="i-save" viewBox="0 0 24 24"><path d="M5 3h11l3 3v15H5V3Zm3 0v6h8V3M8 21v-7h8v7"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3M6 7l1 14h10l1-14M10 11v6M14 11v6"/></symbol>
+    <symbol id="i-edit" viewBox="0 0 24 24"><path d="M4 20h4L20 8l-4-4L4 16v4Zm10-14 4 4"/></symbol>
+    <symbol id="i-more" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/></symbol>
+    <symbol id="i-pull" viewBox="0 0 24 24"><path d="M12 3v13m0 0 4-4m-4 4-4-4M5 21h14"/></symbol>
+    <symbol id="i-push" viewBox="0 0 24 24"><path d="M12 21V8m0 0 4 4m-4-4-4 4M5 3h14"/></symbol>
+    <symbol id="i-stash" viewBox="0 0 24 24"><path d="M4 5h16v4H4zM4 11h16v8H4zM9 15h6"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 4.5 4.5L19 7"/></symbol>
+    <symbol id="i-warning" viewBox="0 0 24 24"><path d="M12 3 2.5 20h19L12 3Zm0 6v5m0 3v.1"/></symbol>
+    <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v6m0-9v.1"/></symbol>
+    <symbol id="i-collapse" viewBox="0 0 24 24"><path d="m7 9 5-5 5 5M7 15l5 5 5-5"/></symbol>
+    <symbol id="i-expand" viewBox="0 0 24 24"><path d="m7 4 5 5 5-5M7 20l5-5 5 5"/></symbol>
+    <symbol id="i-copy" viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="13" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3"/></symbol>
+    <symbol id="i-external" viewBox="0 0 24 24"><path d="M14 4h6v6M20 4l-9 9M18 14v5H5V6h5"/></symbol>
+    <symbol id="i-file-plus" viewBox="0 0 24 24"><path d="M6 3h8l4 4v14H6V3Zm8 1.5V8h3.5M12 12v6m-3-3h6"/></symbol>
+    <symbol id="i-folder-plus" viewBox="0 0 24 24"><path d="M3 6a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6Zm9 5v6m-3-3h6"/></symbol>
+    <symbol id="i-diff" viewBox="0 0 24 24"><path d="M6 3h8l4 4v14H6V3Zm8 1.5V8h3.5M9 12h6M9 16h6M9 8h2"/></symbol>
+    <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M2 12h2m16 0h2M5 5l1.5 1.5M17.5 17.5 19 19M19 5l-1.5 1.5M6.5 17.5 5 19"/></symbol>
+    <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20 15.5A8.5 8.5 0 0 1 8.5 4 8.5 8.5 0 1 0 20 15.5Z"/></symbol>
+    <symbol id="i-list" viewBox="0 0 24 24"><path d="M8 6h13M8 12h13M8 18h13M3 6h.1M3 12h.1M3 18h.1"/></symbol>
+  </svg>
+
+  <div id="boot" class="boot">
+    <div class="boot-logo">P</div>
+    <div class="boot-name">PeaBox IDE</div>
+    <div class="boot-bar"><span></span></div>
+  </div>
+
+  <header class="titlebar">
+    <div class="brand">
+      <div class="logo">P</div>
+      <span class="brand-name">PeaBox IDE</span>
+    </div>
+    <button id="workspaceBtn" class="workspace" title="Open a folder">
+      <svg class="icon"><use href="#i-folder"></use></svg>
+      <span id="workspace">No folder open</span>
+    </button>
+    <button id="commandButton" class="command-trigger" title="Quick open (Ctrl+P)">
+      <svg class="icon"><use href="#i-search"></use></svg>
+      <span>Search files or run commands</span>
+      <kbd>Ctrl P</kbd>
+    </button>
+    <div class="title-actions">
+      <button id="saveBtn" class="icon-btn" title="Save (Ctrl+S)"><svg class="icon"><use href="#i-save"></use></svg></button>
+      <button id="runBtn" class="icon-btn accent" title="Run current file (F5)"><svg class="icon"><use href="#i-play"></use></svg></button>
+      <button id="stopBtn" class="icon-btn danger" title="Stop (Shift+F5)" disabled><svg class="icon"><use href="#i-stop"></use></svg></button>
+      <button id="themeBtn" class="icon-btn" title="Toggle theme"><svg class="icon"><use href="#i-sun"></use></svg></button>
+    </div>
+  </header>
+
+  <div id="layout">
+    <nav class="activitybar" aria-label="Views">
+      <button data-view="explorer" class="activity active" title="Explorer (Ctrl+Shift+E)" aria-label="Explorer"><svg class="icon"><use href="#i-file"></use></svg></button>
+      <button data-view="search" class="activity" title="Search (Ctrl+Shift+F)" aria-label="Search"><svg class="icon"><use href="#i-search"></use></svg></button>
+      <button data-view="git" class="activity" title="Source Control (Ctrl+Shift+G)" aria-label="Source Control"><svg class="icon"><use href="#i-branch"></use></svg></button>
+      <div class="activity-spacer"></div>
+      <button id="settingsBtn" class="activity" title="Settings (Ctrl+,)" aria-label="Settings"><svg class="icon"><use href="#i-settings"></use></svg></button>
+    </nav>
+
+    <aside id="sidebar" class="sidebar">
+      <section id="explorerView" class="view">
+        <div class="view-head">
+          <span>EXPLORER</span>
+          <div class="head-actions">
+            <button id="newFileBtn" class="mini-btn" title="New file"><svg class="icon"><use href="#i-file-plus"></use></svg></button>
+            <button id="newFolderBtn" class="mini-btn" title="New folder"><svg class="icon"><use href="#i-folder-plus"></use></svg></button>
+            <button id="collapseBtn" class="mini-btn" title="Collapse all"><svg class="icon"><use href="#i-collapse"></use></svg></button>
+            <button id="refreshBtn" class="mini-btn" title="Refresh"><svg class="icon"><use href="#i-refresh"></use></svg></button>
+          </div>
+        </div>
+        <div id="tree" class="tree empty">Open a folder to begin.</div>
+      </section>
+
+      <section id="searchView" class="view hidden">
+        <div class="view-head"><span>SEARCH</span></div>
+        <div class="search-box">
+          <div class="search-input-row">
+            <input id="searchInput" type="text" placeholder="Search in files" autocomplete="off" spellcheck="false">
+            <button id="searchCase" class="toggle" title="Match case">Aa</button>
+            <button id="searchWord" class="toggle" title="Whole word">W</button>
+          </div>
+          <div class="search-actions">
+            <span id="searchSummary" class="muted small">Type to search the workspace.</span>
+            <button id="searchClear" class="mini-btn" title="Clear"><svg class="icon"><use href="#i-close"></use></svg></button>
+          </div>
+        </div>
+        <div id="searchResults" class="search-results"></div>
+      </section>
+
+      <section id="gitView" class="view hidden">
+        <div class="view-head">
+          <span>SOURCE CONTROL</span>
+          <div class="head-actions">
+            <button id="gitRefresh" class="mini-btn" title="Refresh"><svg class="icon"><use href="#i-refresh"></use></svg></button>
+          </div>
+        </div>
+        <div id="gitSummary" class="git-summary muted small">Open a folder to use Git.</div>
+        <div class="branch-row">
+          <svg class="icon"><use href="#i-branch"></use></svg>
+          <select id="gitBranch" aria-label="Current branch"></select>
+          <button id="gitNewBranch" class="mini-btn" title="New branch"><svg class="icon"><use href="#i-plus"></use></svg></button>
+        </div>
+        <div id="gitChanges" class="git-changes"></div>
+        <div class="commit-box">
+          <textarea id="commitMessage" placeholder="Commit message (Ctrl+Enter to commit)" spellcheck="false"></textarea>
+          <div class="commit-actions">
+            <button id="commitBtn" class="primary wide">Commit</button>
+          </div>
+        </div>
+        <div class="git-tools">
+          <button id="gitStageAll" class="small-btn">Stage all</button>
+          <button id="gitUnstageAll" class="small-btn">Unstage all</button>
+        </div>
+        <div class="git-tools">
+          <button id="gitPull" class="small-btn">Pull</button>
+          <button id="gitPush" class="small-btn">Push</button>
+          <button id="gitStash" class="small-btn">Stash</button>
+          <button id="gitStashPop" class="small-btn">Pop</button>
+        </div>
+      </section>
+      <div id="sidebarResizer" class="resizer vertical" title="Drag to resize"></div>
+    </aside>
+
+    <main id="main">
+      <div id="tabs" class="tabs" role="tablist"></div>
+      <div id="breadcrumb" class="breadcrumb hidden"></div>
+      <div id="editorArea" class="editor-area">
+        <div id="editor" class="editor"></div>
+
+        <div id="welcome" class="welcome">
+          <div class="welcome-inner">
+            <div class="welcome-logo">P</div>
+            <h1>PeaBox IDE</h1>
+            <p class="welcome-sub">A fast, local-first editor for focused work.</p>
+            <div class="welcome-actions">
+              <button id="welcomeOpen" class="primary big"><svg class="icon"><use href="#i-folder-open"></use></svg> Open Folder</button>
+              <button id="welcomeNew" class="big"><svg class="icon"><use href="#i-file-plus"></use></svg> New File</button>
+              <button id="welcomePalette" class="big"><svg class="icon"><use href="#i-palette"></use></svg> Commands</button>
+            </div>
+            <div class="welcome-grid">
+              <div class="welcome-card">
+                <h3>Recent projects</h3>
+                <div id="recent" class="recent-list"></div>
+              </div>
+              <div class="welcome-card">
+                <h3>Shortcuts</h3>
+                <dl class="shortcut-list">
+                  <div><dt>Quick open</dt><dd><kbd>Ctrl</kbd> <kbd>P</kbd></dd></div>
+                  <div><dt>Command palette</dt><dd><kbd>Ctrl</kbd> <kbd>Shift</kbd> <kbd>P</kbd></dd></div>
+                  <div><dt>Save</dt><dd><kbd>Ctrl</kbd> <kbd>S</kbd></dd></div>
+                  <div><dt>Terminal</dt><dd><kbd>Ctrl</kbd> <kbd>`</kbd></dd></div>
+                  <div><dt>Run</dt><dd><kbd>F5</kbd></dd></div>
+                </dl>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <section id="panel" class="panel hidden">
+        <div class="panel-head">
+          <div class="panel-tabs" id="panelTabs">
+            <button class="panel-tab active" data-panel="terminalPane"><svg class="icon"><use href="#i-terminal"></use></svg> TERMINAL</button>
+            <button class="panel-tab" data-panel="outputPane"><svg class="icon"><use href="#i-output"></use></svg> OUTPUT</button>
+          </div>
+          <div class="panel-actions">
+            <button id="newTerminal" class="mini-btn" title="New terminal"><svg class="icon"><use href="#i-plus"></use></svg></button>
+            <button id="clearOutput" class="mini-btn" title="Clear"><svg class="icon"><use href="#i-trash"></use></svg></button>
+            <button id="closePanel" class="mini-btn" title="Close panel"><svg class="icon"><use href="#i-close"></use></svg></button>
+          </div>
+        </div>
+        <div id="panelResizer" class="resizer horizontal" title="Drag to resize"></div>
+        <div id="terminalPane" class="panel-pane">
+          <div id="terminalTabs" class="terminal-tabs"></div>
+          <div id="terminalHost" class="terminal-host"></div>
+          <div id="terminalError" class="terminal-error hidden"></div>
+        </div>
+        <pre id="outputPane" class="panel-pane output hidden"><span id="output">Ready.</span></pre>
+      </section>
+
+      <footer class="statusbar">
+        <span id="status" class="status-main">Ready</span>
+        <span id="runStatus" class="status-item hidden"></span>
+        <span id="gitStatus" class="status-item clickable hidden" title="Open source control"></span>
+        <span id="dirtyStatus" class="status-item"></span>
+        <span id="spacesStatus" class="status-item">Spaces: 2</span>
+        <span id="eolStatus" class="status-item">LF</span>
+        <span id="language" class="status-item">Plain Text</span>
+        <span id="position" class="status-item">Ln 1, Col 1</span>
+        <button id="panelBtn" class="status-item status-btn" title="Toggle panel (Ctrl+J)"><svg class="icon"><use href="#i-output"></use></svg></button>
+      </footer>
+    </main>
+  </div>
+
+  <div id="palette" class="overlay hidden" role="dialog" aria-modal="true" aria-label="Quick open">
+    <div class="palette-box">
+      <div class="palette-input-row">
+        <svg class="icon"><use href="#i-search"></use></svg>
+        <input id="paletteInput" type="text" placeholder="Search files by name…" autocomplete="off" spellcheck="false" aria-controls="paletteList" aria-autocomplete="list">
+        <kbd>Esc</kbd>
+      </div>
+      <div id="paletteList" class="palette-list" role="listbox"></div>
+      <div id="paletteHint" class="palette-hint"></div>
+    </div>
+  </div>
+
+  <div id="modal" class="overlay hidden" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+    <div class="modal-box">
+      <div class="modal-head">
+        <h3 id="modalTitle"></h3>
+        <button id="modalClose" class="mini-btn" title="Close"><svg class="icon"><use href="#i-close"></use></svg></button>
+      </div>
+      <div id="modalBody" class="modal-body"></div>
+      <div id="modalFooter" class="modal-footer"></div>
+    </div>
+  </div>
+
+  <div id="contextMenu" class="context-menu hidden" role="menu"></div>
+  <div id="toasts" class="toasts" aria-live="polite"></div>
+
+  <script src="shared.js"></script>
+  <script src="./node_modules/@xterm/xterm/lib/xterm.js"></script>
+  <script src="./node_modules/@xterm/addon-fit/lib/addon-fit.js"></script>
+  <script src="./node_modules/monaco-editor/min/vs/loader.js"></script>
+  <script src="renderer.js"></script>
+</body>
+</html>
