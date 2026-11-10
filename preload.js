@@ -42,7 +42,9 @@ contextBridge.exposeInMainWorld('api', {
     remove: (path) => invoke('file:delete', path),
     reveal: (path) => invoke('file:reveal', path),
     watchStart: (path) => invoke('watch:start', path),
-    watchStop: (path) => invoke('watch:stop', path)
+    watchStop: (path) => invoke('watch:stop', path),
+    encoding: (file) => invoke('file:encoding', { file }),
+    eol: (file) => invoke('file:eol', { file })
   },
 
   git: {
@@ -59,14 +61,20 @@ contextBridge.exposeInMainWorld('api', {
     createBranch: (payload) => invoke('git:createBranch', payload),
     pull: (cwd) => invoke('git:pull', cwd),
     push: (cwd) => invoke('git:push', cwd),
+    fetch: (cwd) => invoke('git:fetch', cwd),
     stash: (cwd) => invoke('git:stash', cwd),
-    stashPop: (cwd) => invoke('git:stashPop', cwd)
+    stashPop: (cwd) => invoke('git:stashPop', cwd),
+    remote: (cwd) => invoke('git:remote', cwd)
   },
 
   run: {
     start: (payload) => invoke('run:start', payload),
     stop: () => invoke('run:stop'),
     check: (exe) => invoke('run:check', exe)
+  },
+
+  runtime: {
+    detect: (payload) => invoke('runtime:detect', payload)
   },
 
   terminal: {

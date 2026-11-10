@@ -152,3 +152,40 @@ test('defaultState matches the persisted schema', () => {
   assert.ok(state.settings && typeof state.settings === 'object');
   assert.equal(state.settings.theme, 'dark');
 });
+
+test('detectFileEncoding detects UTF-8 BOM', () => {
+  const buf = [0xEF, 0xBB, 0xBF, 0x41, 0x42]; // BOM + "AB"
+  const result = PB.detectFileEncoding(buf);
+  assert.equal(result.bomDetected, true);
+  assert.equal(result.encoding, 'utf-8');
+  assert.equal(result.hasNul, false);
+  assert.equal(result.isBinary, false);
+});
+
+test('detectFileEncoding detects UTF-16 LE BOM', () => {
+  const buf = [0xFF, 0xFE, 0x41, 0x00, 0x42, 0x00];
+  const result = PB.detectFileEncoding(buf);
+  assert.equal(result.bomDetected, true);
+  assert.equal(result.encoding, 'utf-16-le');
+});
+
+test('detectFileEncoding marks binary buffers with NUL bytes', () => {
+  const buf = [0x00, 0xFF, 0x00, 0x42];
+  const result = PB.detectFileEncoding(buf);
+  assert.equal(result.hasNul, true);
+  assert.equal(result.isBinary, true);
+  assert.equal(result.bomDetected, false);
+});
+
+test('detectFileEncoding works with raw strings', () => {
+  const result = PB.detectFileEncoding('plain ascii');
+  assert.equal(result.encoding, 'utf-8');
+  assert.equal(result.bomDetected, false);
+  assert.equal(result.isBinary, false);
+});
+
+test('normalizeLineEndings converts mixed endings', () => {
+  assert.equal(PB.normalizeLineEndings('a\nb\r\nc\rd'), 'a\nb\nc\nd');
+  assert.equal(PB.normalizeLineEndings('a\nb\nc', 'crlf'), 'a\r\nb\r\nc');
+  assert.equal(PB.normalizeLineEndings('a\r\nb\n', 'cr'), 'a\rb\r');
+});

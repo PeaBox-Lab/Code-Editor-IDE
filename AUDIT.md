@@ -143,3 +143,14 @@ The old preload exposed raw `ipcRenderer` and the main process trusted any path.
 - Git operations assume credentials are already configured for non-interactive use.
 - The integrated terminal relies on the `node-pty` prebuilt binary; a platform or
   Electron version without a matching prebuild needs a C++ toolchain to rebuild.
+
+## v0.16.0 addendum (2026-11-10)
+
+- **New IPC handlers**: `git:fetch`, `git:remote`, `runtime:detect`, `file:encoding`, `file:eol`.
+- **New preload API**: `api.git.fetch`, `api.git.remote`, `api.runtime.detect`, `api.file.encoding`, `api.file.eol`.
+- **UI**: Fetch button added to Source Control panel; status bar now includes an encoding indicator.
+- **Settings**: Each runtime row has an "Auto-Detect" button that probes the runtime and populates the path.
+- **Shared module**: New `PB.detectFileEncoding` and `PB.normalizeLineEndings`, both unit-tested.
+- **Tests**: 20 unit tests (up from 15), all passing. E2E still passes.
+- **Validation**: 119 DOM ids, 36 icons, 56 IPC handlers.
+- **Artifacts**: `PeaBox-IDE-0.16.0-Windows-x64.exe` (portable) and `PeaBox-IDE-0.16.0-Windows-x64.zip` created.

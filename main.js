@@ -767,10 +767,48 @@ ipcMain.handle('git:createBranch', async (_, payload) => {
   return git(dir, ['switch', '-c', check.value], 60000);
 });
 
-ipcMain.handle('git:pull', (_, cwd) => git(registeredRoot(cwd), ['pull'], 120000));
-ipcMain.handle('git:push', (_, cwd) => git(registeredRoot(cwd), ['push'], 120000));
+ipcMain.handle('git:pull', async (_, cwd) => {
+  const dir = registeredRoot(cwd);
+  const dirRes = await git(dir, ['rev-parse', '--is-inside-work-tree'], 10000);
+  if (!dirRes.ok) return { ok: false, text: dirRes.text || 'Not a Git repository.' };
+  const [pullRes, fetchRes] = await Promise.all([
+    git(dir, ['pull'], 120000),
+    git(dir, ['fetch', 'origin'], 120000).catch(() => ({ ok: false, code: -1, text: 'Fetch failed.' }))
+  ]);
+  return { ok: pullRes.ok, text: pullRes.text || fetchRes.text, pull: pullRes, fetch: fetchRes };
+});
+ipcMain.handle('git:push', async (_, cwd) => {
+  const dir = registeredRoot(cwd);
+  const dirRes = await git(dir, ['rev-parse', '--is-inside-work-tree'], 10000);
+  if (!dirRes.ok) return { ok: false, text: dirRes.text || 'Not a Git repository.' };
+  const res = await git(dir, ['push'], 120000);
+  return { ok: res.ok, text: res.text, res };
+});
+ipcMain.handle('git:fetch', async (_, cwd) => {
+  const dir = registeredRoot(cwd);
+  const res = await git(dir, ['fetch', 'origin'], 120000);
+  return { ok: res.ok, text: res.text, res };
+});
 ipcMain.handle('git:stash', (_, cwd) => git(registeredRoot(cwd), ['stash', 'push', '-u', '-m', 'PeaBox ' + new Date().toISOString()], 60000));
 ipcMain.handle('git:stashPop', (_, cwd) => git(registeredRoot(cwd), ['stash', 'pop'], 60000));
+
+ipcMain.handle('git:remote', async (_, cwd) => {
+  const dir = registeredRoot(cwd);
+  const res = await git(dir, ['remote', '-v'], 10000);
+  const remotes = [];
+  const lines = res.stdout.split(/\r?\n/).filter((x) => x && !x.startsWith('Fetching') && !x.startsWith('Pulling'));
+  let url = null;
+  for (const line of lines) {
+    const parts = line.trim().split(/\s+/);
+    if (parts.length >= 2) {
+      if (parts[0] !== 'origin') {
+        remotes.push({ name: parts[0], url: parts[1], push: parts[2] || parts[1] });
+      }
+      url = parts[parts.length - 1];
+    }
+  }
+  return { remotes };
+});
 
 /* ---------------- IPC: run ---------------- */
 
@@ -816,6 +854,40 @@ ipcMain.handle('run:check', async (_, exe) => {
   if (!command) return { ok: false, text: 'No runtime path.' };
   const res = await runProcess(command, ['--version'], { timeout: 8000 });
   return { ok: res.code === 0, code: res.code, text: (res.stdout || res.stderr || '').trim(), timedOut: res.timedOut };
+});
+
+ipcMain.handle('runtime:detect', async (_, payload) => {
+  const name = String(payload && payload.name || '').trim();
+  const path = String(payload && payload.path || '').trim();
+  if (!name) return { ok: false, text: 'No runtime name specified.' };
+  const exe = path || name;
+  const res = await runProcess(exe, ['--version'], { timeout: 10000 });
+  return { ok: res.code === 0, name, path: exe, text: (res.stdout || res.stderr || '').trim(), code: res.code, timedOut: res.timedOut };
+});
+
+ipcMain.handle('file:encoding', async (_, payload) => {
+  const file = assertAllowed(payload && payload.file);
+  const buf = fs.readFileSync(file);
+  let encoding = 'utf-8';
+  let bomDetected = false;
+  if (buf.length >= 3 && buf[0] === 0xEF && buf[1] === 0xBB && buf[2] === 0xBF) { encoding = 'utf-8'; bomDetected = true; }
+  else if (buf.length >= 2 && buf[0] === 0xFF && buf[1] === 0xFE) { encoding = 'utf-16-le'; bomDetected = true; }
+  else if (buf.length >= 2 && buf[0] === 0xFE && buf[1] === 0xFF) { encoding = 'utf-16-be'; bomDetected = true; }
+  else if (buf.length >= 4 && buf[0] === 0x00 && buf[1] === 0x00 && buf[2] === 0xFE && buf[3] === 0xFF) { encoding = 'utf-32-be'; bomDetected = true; }
+  else if (buf.length >= 4 && buf[0] === 0xFF && buf[1] === 0xFE && buf[2] === 0x00 && buf[3] === 0x00) { encoding = 'utf-32-le'; bomDetected = true; }
+  const hasNul = buf.includes(0);
+  let lineEnding = 'LF';
+  if (buf.includes(0x0D0A)) lineEnding = 'CRLF';
+  else if (buf.includes(0x0D)) lineEnding = 'CR';
+  return { encoding, bomDetected, hasNul, lineEnding, size: buf.length };
+});
+
+ipcMain.handle('file:eol', async (_, payload) => {
+  const file = assertAllowed(payload && payload.file);
+  const buf = fs.readFileSync(file);
+  const crlf = buf.includes(0x0D0A);
+  const cr = buf.includes(0x0D) && !crlf;
+  return { lineEnding: crlf ? 'CRLF' : cr ? 'CR' : 'LF', hasNul: buf.includes(0) };
 });
 
 /* ---------------- IPC: terminal ---------------- */

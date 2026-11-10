@@ -1,6 +1,6 @@
 {
   "name": "peabox-ide",
-  "version": "0.15.0",
+  "version": "0.16.0",
   "private": true,
   "description": "A fast, local-first desktop code editor with a lazy explorer, async search, Git integration, runtimes, terminals and crash recovery.",
   "main": "main.js",
@@ -18,7 +18,8 @@
     "test:e2e": "node tests/electron.spec.js",
     "build": "npm run validate && npm run test:unit && electron-builder --win portable zip --x64",
     "build:portable": "npm run build",
-    "postinstall": "node tools/postinstall.js"
+    "postinstall": "node tools/postinstall.js",
+    "audit": "npm audit --omit=dev"
   },
   "dependencies": {
     "@xterm/addon-fit": "^0.10.0",
@@ -30,7 +31,8 @@
   "devDependencies": {
     "electron": "^38.0.0",
     "electron-builder": "^26.0.12",
-    "playwright": "^1.56.0"
+    "playwright": "^1.56.0",
+    "eslint": "^9.0.0"
   },
   "build": {
     "appId": "com.peabox.ide",
@@ -49,8 +51,10 @@
       "index.html",
       "style.css",
       "package.json",
-      "node_modules/**/*",
-      "!node_modules/.cache/**",
+      "tests/**/*",
+      "tools/**/*",
+      "README.md",
+      "AUDIT.md",
       "!**/*.map"
     ],
     "win": {

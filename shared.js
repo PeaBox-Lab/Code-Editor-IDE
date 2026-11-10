@@ -1,5 +1,17 @@
 /* PeaBox shared helpers. Loaded as a classic script in the renderer and
-   required by the main process and tests (UMD, no dependencies). */
+   required by the main process and tests (UMD, no dependencies).
+
+   This module provides utility functions for:
+   - Path normalization and validation
+   - File extension / language detection
+   - Git status parsing
+   - State sanitization and validation
+   - Formatting utilities (bytes, duration, time)
+   - Branch name validation
+   - Search and matching algorithms
+
+   All functions are pure where possible and have no external dependencies.
+*/
 (function (root, factory) {
   if (typeof module === 'object' && module.exports) module.exports = factory();
   else root.PeaBoxShared = factory();
@@ -189,6 +201,49 @@
     return { ok: true, value: n };
   }
 
+  /**
+   * Detects file encoding from a raw byte array or string.
+   * Works in both browser and Node contexts.
+   * @param {Array<number>|string} bytes - Raw bytes as an array of numbers, or a raw string sample.
+   * @param {number} [sampleSize=4096] - Number of bytes to sample for detection.
+   * @returns {object} { encoding, bomDetected, hasNul, isBinary }
+   */
+  function detectFileEncoding(bytes, sampleSize) {
+    var sample = [];
+    if (typeof bytes === 'string') {
+      for (var i = 0; i < bytes.length && i < sampleSize; i++) sample.push(bytes.charCodeAt(i) & 0xFF);
+    } else if (Array.isArray(bytes)) {
+      sample = bytes.slice(0, sampleSize || 4096);
+    } else if (bytes && typeof bytes.length === 'number') {
+      for (var j = 0; j < bytes.length && j < (sampleSize || 4096); j++) sample.push(bytes[j]);
+    }
+    var encoding = 'utf-8';
+    var bomDetected = false;
+    var hasNul = false;
+    if (sample.length >= 3 && sample[0] === 0xEF && sample[1] === 0xBB && sample[2] === 0xBF) { encoding = 'utf-8'; bomDetected = true; }
+    else if (sample.length >= 2 && sample[0] === 0xFF && sample[1] === 0xFE) { encoding = 'utf-16-le'; bomDetected = true; }
+    else if (sample.length >= 2 && sample[0] === 0xFE && sample[1] === 0xFF) { encoding = 'utf-16-be'; bomDetected = true; }
+    else if (sample.length >= 4 && sample[0] === 0xFF && sample[1] === 0xFE && sample[2] === 0x00 && sample[3] === 0x00) { encoding = 'utf-32-le'; bomDetected = true; }
+    else if (sample.length >= 4 && sample[0] === 0x00 && sample[1] === 0x00 && sample[2] === 0xFE && sample[3] === 0xFF) { encoding = 'utf-32-be'; bomDetected = true; }
+    for (var k = 0; k < sample.length; k++) { if (sample[k] === 0) { hasNul = true; break; } }
+    return { encoding: encoding, bomDetected: bomDetected, hasNul: hasNul, isBinary: hasNul && !bomDetected };
+  }
+
+  /**
+   * Normalizes line endings in file content.
+   * @param {string} content - File content to normalize.
+   * @param {string} [to='lf'] - Target line ending ('lf', 'crlf', 'native'). Defaults to 'lf'.
+   * @returns {string} Content with normalized line endings.
+   */
+  function normalizeLineEndings(content, to) {
+    var s = str(content);
+    s = s.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+    var target = String(to || 'lf').toLowerCase();
+    if (target === 'crlf') return s.replace(/\n/g, '\r\n');
+    if (target === 'cr') return s.replace(/\n/g, '\r');
+    return s;
+  }
+
   function formatBytes(bytes) {
     var n = Number(bytes) || 0;
     if (n < 1024) return n + ' B';
@@ -300,6 +355,8 @@
     relativeTime: relativeTime,
     defaultSettings: defaultSettings,
     defaultState: defaultState,
-    sanitizeState: sanitizeState
+    sanitizeState: sanitizeState,
+    detectFileEncoding: detectFileEncoding,
+    normalizeLineEndings: normalizeLineEndings
   };
 });

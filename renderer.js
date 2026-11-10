@@ -442,6 +442,7 @@ function updateStatus() {
   const entry = currentEntry();
   $('language').textContent = entry ? languageLabel(entry) : 'Plain Text';
   updateEol();
+  updateEncodingStatus();
   updateDirtyStatus();
   updatePositionStatus();
 }
@@ -1462,6 +1463,42 @@ async function gitBulk(kind) {
   } catch (err) { toast(err.message, 'error'); }
 }
 
+/**
+ * Explicitly fetches from origin and refreshes the Git view.
+ */
+async function gitFullFetch() {
+  if (!S.root) { toast('Open a folder first.', 'warn'); return; }
+  try {
+    const res = await api.git.fetch(S.root);
+    if (res.ok) {
+      showOutput('$ git fetch origin\n' + (res.text || 'Done.') + '\n');
+      toast('Git fetch completed.', 'success', 2000);
+    } else {
+      toast(res.text || 'Fetch failed.', 'error', 4500);
+    }
+    await refreshGit();
+  } catch (err) { toast(err.message, 'error'); }
+}
+
+/**
+ * Updates the encoding and EOL indicators in the status bar.
+ */
+async function updateEncodingStatus() {
+  const entry = currentEntry();
+  if (!entry || entry.virtual) {
+    $('encodingStatus').textContent = '—';
+    return;
+  }
+  try {
+    const [enc, eol] = await Promise.all([
+      api.file.encoding(entry.path),
+      api.file.eol(entry.path)
+    ]);
+    $('encodingStatus').textContent = (enc.encoding || 'utf-8').toUpperCase() + (enc.bomDetected ? ' (BOM)' : '');
+    if (eol && eol.lineEnding) $('eolStatus').textContent = eol.lineEnding;
+  } catch { /* ignore */ }
+}
+
 /* ---------------- run ---------------- */
 
 function bindRun() {
@@ -2092,6 +2129,7 @@ async function openSettings() {
     const wrap = el('div', 'inline');
     const input = textInput(s.runtimes[key]);
     const test = el('button', null, 'Check');
+    const detect = el('button', null, 'Detect');
     const status = el('div', 'runtime-status');
     test.onclick = async () => {
       test.disabled = true;
@@ -2103,7 +2141,24 @@ async function openSettings() {
       } catch (err) { status.textContent = err.message; status.style.color = 'var(--red)'; }
       finally { test.disabled = false; }
     };
-    wrap.append(input, test);
+    detect.onclick = async () => {
+      detect.disabled = true;
+      status.textContent = 'Detecting…';
+      status.style.color = 'var(--faint)';
+      try {
+        const res = await api.runtime.detect({ name: input.value.trim() || key, path: input.value.trim() });
+        if (res.ok) {
+          input.value = res.path;
+          status.textContent = 'Detected: ' + (res.text.split('\n')[0] || 'OK');
+          status.style.color = 'var(--green)';
+        } else {
+          status.textContent = (res.text || 'Not found');
+          status.style.color = 'var(--red)';
+        }
+      } catch (err) { status.textContent = err.message; status.style.color = 'var(--red)'; }
+      finally { detect.disabled = false; }
+    };
+    wrap.append(input, test, detect);
     const row = settingsRow(label, desc, wrap);
     row.appendChild(status);
     runtimeInputs[key] = input;
@@ -2413,6 +2468,7 @@ function bindEvents() {
   $('gitUnstageAll').onclick = () => gitBulk('unstageAll');
   $('gitPull').onclick = () => gitBulk('pull');
   $('gitPush').onclick = () => gitBulk('push');
+  $('gitFetch').onclick = () => gitFullFetch();
   $('gitStash').onclick = () => gitBulk('stash');
   $('gitStashPop').onclick = () => gitBulk('stashPop');
 
