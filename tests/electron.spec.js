@@ -67,6 +67,52 @@ const createdPath = path.join(fixture, 'src', 'created-by-test.js');
     await win.locator('.tree-row', { hasText: 'app.py' }).first().click();
     await win.waitForFunction(() => document.querySelectorAll('.tab').length === 2);
 
+    // Quick open: Ctrl+P filters the workspace file list and opens on Enter.
+    await win.keyboard.press('Control+P');
+    await win.waitForSelector('#command-palette-overlay:not(.hidden)');
+    await win.fill('#command-palette-input', 'leaf.js');
+    await win.waitForFunction(
+      () => Array.from(document.querySelectorAll('#command-palette-results .palette-item'))
+        .some((n) => n.textContent.includes('leaf.js')),
+      null,
+      { timeout: 10000 }
+    );
+    await win.press('#command-palette-input', 'Enter');
+    await win.waitForFunction(
+      () => document.getElementById('command-palette-overlay').classList.contains('hidden') &&
+        document.querySelector('.tab.active') &&
+        document.querySelector('.tab.active').textContent.includes('leaf.js'),
+      null,
+      { timeout: 10000 }
+    );
+
+    // Go to symbol: Ctrl+Shift+O jumps inside the active document.
+    await win.locator('.tree-row', { hasText: 'app.py' }).first().click();
+    await win.waitForFunction(
+      () => document.querySelector('.tab.active') &&
+        document.querySelector('.tab.active').textContent.includes('app.py')
+    );
+    await win.keyboard.press('Control+Shift+O');
+    await win.waitForSelector('#command-palette-overlay:not(.hidden)');
+    await win.fill('#command-palette-input', '@greet');
+    await win.waitForFunction(
+      () => Array.from(document.querySelectorAll('#command-palette-results .palette-item'))
+        .some((n) => n.textContent.includes('greet')),
+      null,
+      { timeout: 10000 }
+    );
+    await win.press('#command-palette-input', 'Enter');
+    await win.waitForFunction(
+      () => document.getElementById('position').textContent === 'Ln 4, Col 5',
+      null,
+      { timeout: 10000 }
+    );
+    assert.equal(
+      await win.evaluate(() => document.getElementById('command-palette-overlay').classList.contains('hidden')),
+      true,
+      'symbol palette did not close after jumping'
+    );
+
     // Search across files, including the nested fixture.
     await win.click('[data-view="search"]');
     await win.fill('#searchInput', 'search marker');
@@ -95,9 +141,9 @@ const createdPath = path.join(fixture, 'src', 'created-by-test.js');
 
     // Command palette opens.
     await win.click('#commandButton');
-    await win.waitForSelector('#palette:not(.hidden)');
-    await win.press('#paletteInput', 'Escape');
-    await win.waitForFunction(() => document.getElementById('palette').classList.contains('hidden'));
+    await win.waitForSelector('#command-palette-overlay:not(.hidden)');
+    await win.press('#command-palette-input', 'Escape');
+    await win.waitForFunction(() => document.getElementById('command-palette-overlay').classList.contains('hidden'));
 
     // Create a file through the explorer context menu (custom modal + Enter).
     await win.click('[data-view="explorer"]');
@@ -130,15 +176,52 @@ const createdPath = path.join(fixture, 'src', 'created-by-test.js');
     await app.evaluate(({ dialog }, file) => {
       dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [file] });
     }, path.join(fixture, 'notes.txt'));
-    await win.keyboard.press('Control+Shift+O');
+    await win.keyboard.press('Control+Alt+O');
     await win.waitForFunction(
       () => Array.from(document.querySelectorAll('.tab')).some((t) => t.textContent.includes('notes.txt')),
       null,
       { timeout: 10000 }
     );
 
+    // The Run panel forwards stdin so interactive programs can read input.
+    await win.keyboard.press('Control+P');
+    await win.waitForSelector('#command-palette-overlay:not(.hidden)');
+    await win.fill('#command-palette-input', 'run-input.js');
+    await win.waitForFunction(
+      () => Array.from(document.querySelectorAll('#command-palette-results .palette-item'))
+        .some((n) => n.textContent.includes('run-input.js')),
+      null,
+      { timeout: 10000 }
+    );
+    await win.press('#command-palette-input', 'Enter');
+    await win.waitForFunction(
+      () => document.querySelector('.tab.active') &&
+        document.querySelector('.tab.active').textContent.includes('run-input.js'),
+      null,
+      { timeout: 10000 }
+    );
+    await win.keyboard.press('F5');
+    await win.waitForSelector('#runInputRow:not(.hidden)', { timeout: 15000 });
+    await win.waitForFunction(
+      () => document.getElementById('output').textContent.includes('Name? '),
+      null,
+      { timeout: 15000 }
+    );
+    await win.fill('#runInput', 'PeaBox');
+    await win.press('#runInput', 'Enter');
+    await win.waitForFunction(
+      () => document.getElementById('output').textContent.includes('Hello, PeaBox! Interactive input works.'),
+      null,
+      { timeout: 15000 }
+    );
+    await win.waitForFunction(
+      () => document.getElementById('runStatus').textContent === 'Finished',
+      null,
+      { timeout: 15000 }
+    );
+
     // Terminal: a live xterm backed by node-pty must accept keyboard input.
-    await win.click('#panelBtn');
+    if (!(await win.isVisible('#panel'))) await win.click('#panelBtn');
     await win.waitForSelector('#panel:not(.hidden)');
     await win.click('#newTerminal');
     await win.waitForSelector('.xterm', { timeout: 20000 });
@@ -163,7 +246,7 @@ const createdPath = path.join(fixture, 'src', 'created-by-test.js');
     );
 
     assert.deepEqual(pageErrors, [], 'renderer threw uncaught errors');
-    console.log('E2E PASS: boot, nested folder, editor, search, theme, settings, palette, file create/save, open file, live terminal');
+    console.log('E2E PASS: boot, nested folder, editor, search, theme, settings, palette, quick open, symbol jump, file create/save, open file, interactive run input, live terminal');
   } finally {
     await app.close();
     try { fs.rmSync(createdPath, { force: true }); } catch { /* ignore */ }

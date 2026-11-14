@@ -7,7 +7,8 @@ const fsp = fs.promises;
 const path = require('path');
 const os = require('os');
 const crypto = require('crypto');
-const { spawn } = require('child_process');
+const { spawn, execFile } = require('child_process');
+const { StringDecoder } = require('string_decoder');
 const writeFileAtomic = require('write-file-atomic');
 const PB = require('./shared');
 
@@ -38,6 +39,7 @@ let workspaceWatchTimer = null;
 
 const userDir = () => app.getPath('userData');
 const stateFile = () => path.join(userDir(), 'state.json');
+const sessionFile = () => path.join(userDir(), 'session.json');
 const windowFile = () => path.join(userDir(), 'window.json');
 const recoveryDir = () => path.join(userDir(), 'recovery');
 
@@ -129,6 +131,39 @@ function registerStatePaths(state) {
   for (const d of dirs) {
     try { if (d && isDir(d)) registerRoot(d); } catch { /* ignore stale */ }
   }
+}
+
+/* ---------------- hot-exit session ---------------- */
+
+function readSession() {
+  try { return PB.sanitizeSession(JSON.parse(fs.readFileSync(sessionFile(), 'utf8'))); }
+  catch { return PB.defaultSession(); }
+}
+
+function writeSession(raw) {
+  const clean = PB.sanitizeSession(raw);
+  fs.mkdirSync(path.dirname(sessionFile()), { recursive: true });
+  writeFileAtomic.sync(sessionFile(), JSON.stringify(clean, null, 2), { encoding: 'utf8', fsync: true });
+  return clean;
+}
+
+function cliTarget() {
+  const args = process.argv.slice(app.isPackaged ? 1 : 2);
+  for (const arg of args) {
+    if (!arg || arg.startsWith('-')) continue;
+    try {
+      const abs = path.resolve(String(arg));
+      if (isDir(abs)) {
+        try { registerRoot(abs); } catch { /* allow later registration */ }
+        return { path: abs, isDir: true };
+      }
+      if (isFile(abs)) {
+        addAllowed(abs);
+        return { path: abs, isDir: false };
+      }
+    } catch { /* skip unusable argument */ }
+  }
+  return null;
 }
 
 function readWindowState() {
@@ -234,6 +269,22 @@ async function git(cwd, args, timeout) {
   };
 }
 
+function execGitStatus(dir) {
+  return new Promise((resolve) => {
+    execFile('git', ['status', '--porcelain=v1', '-b'], {
+      cwd: dir, timeout: 3000, windowsHide: true, maxBuffer: 8 * 1024 * 1024, env: gitEnv()
+    }, (err, stdout, stderr) => {
+      resolve({
+        ok: !err,
+        code: err && typeof err.code === 'number' ? err.code : (err ? -1 : 0),
+        waited: !!(err && err.killed),
+        stdout: String(stdout || ''),
+        stderr: String(stderr || (err && err.message) || '')
+      });
+    });
+  });
+}
+
 /* ---------------- filesystem listing / search ---------------- */
 
 function excluded(name, excludes) {
@@ -299,7 +350,7 @@ function buildMenu() {
     {
       label: 'File', submenu: [
         { label: 'Open Folder…', accelerator: 'CmdOrCtrl+O', click: () => sendCommand('workspace.open') },
-        { label: 'Open File…', accelerator: 'CmdOrCtrl+Shift+O', click: () => sendCommand('file.open') },
+        { label: 'Open File…', accelerator: 'CmdOrCtrl+Alt+O', click: () => sendCommand('file.open') },
         { label: 'New File…', accelerator: 'CmdOrCtrl+N', click: () => sendCommand('file.new') },
         { label: 'Open Recent', submenu: recent.length ? recent : [{ label: 'No recent projects', enabled: false }] },
         { type: 'separator' },
@@ -328,6 +379,7 @@ function buildMenu() {
       label: 'View', submenu: [
         { label: 'Command Palette…', accelerator: 'CmdOrCtrl+Shift+P', click: () => sendCommand('palette.commands') },
         { label: 'Quick Open…', accelerator: 'CmdOrCtrl+P', click: () => sendCommand('palette.files') },
+        { label: 'Go to Symbol…', accelerator: 'CmdOrCtrl+Shift+O', click: () => sendCommand('palette.symbols') },
         { type: 'separator' },
         { label: 'Explorer', accelerator: 'CmdOrCtrl+Shift+E', click: () => sendCommand('view.explorer') },
         { label: 'Search', accelerator: 'CmdOrCtrl+Shift+F', click: () => sendCommand('view.search') },
@@ -445,7 +497,8 @@ ipcMain.handle('app:info', () => ({
   platform: process.platform,
   electron: process.versions.electron,
   chrome: process.versions.chrome,
-  packaged: app.isPackaged
+  packaged: app.isPackaged,
+  cli: cliTarget()
 }));
 
 ipcMain.handle('app:loadState', () => {
@@ -468,6 +521,19 @@ ipcMain.handle('app:loadState', () => {
 });
 
 ipcMain.handle('app:saveState', (_, state) => writeState(state));
+
+ipcMain.handle('session:load', () => {
+  const session = readSession();
+  if (session.workspace && isDir(session.workspace)) {
+    try { registerRoot(session.workspace); } catch { /* stale workspace */ }
+  }
+  for (const tab of session.tabs || []) {
+    try { if (tab.path && isFile(tab.path)) addAllowed(tab.path); } catch { /* ignore stale */ }
+  }
+  return session;
+});
+
+ipcMain.handle('session:save', (_, session) => writeSession(session));
 ipcMain.handle('app:copy', (_, text) => { clipboard.writeText(String(text || '').slice(0, 1024 * 1024)); return true; });
 ipcMain.handle('app:close', (_, action) => {
   clearTimeout(closeWatchdog);
@@ -607,6 +673,44 @@ ipcMain.handle('workspace:search', async (_, payload) => {
   return { hits, truncated: truncated || result.truncated, filesScanned: result.scanned };
 });
 
+ipcMain.handle('workspace:replace', async (_, payload) => {
+  const rootPath = registeredRoot(payload && payload.root);
+  const query = String((payload && payload.query) || '');
+  if (!query) return { ok: false, total: 0, files: [], error: 'Enter text to replace.' };
+  const replacement = String((payload && payload.replacement) || '');
+  const dryRun = !payload || payload.dryRun !== false;
+  const options = {
+    caseSensitive: !!(payload && payload.caseSensitive),
+    wholeWord: !!(payload && payload.wholeWord)
+  };
+  const excludes = PB.splitExcludes(payload && payload.excludes);
+  const files = [];
+  let total = 0;
+  let truncated = false;
+
+  const result = await scanWorkspace(rootPath, { excludes, timeout: 20000 }, async (full, rel) => {
+    if (files.length >= 500) { truncated = true; return false; }
+    let st;
+    try { st = await fsp.stat(full); } catch { return true; }
+    if (st.size > 2 * 1024 * 1024) return true;
+    let buf;
+    try { buf = await fsp.readFile(full); } catch { return true; }
+    if (buf.includes(0)) return true;
+    const content = buf.toString('utf8');
+    const replaced = PB.replaceInText(content, query, replacement, options);
+    if (!replaced.count) return true;
+    files.push({ path: full, rel, count: replaced.count });
+    total += replaced.count;
+    if (!dryRun) {
+      try { await writeFileAtomic(full, replaced.text, { encoding: 'utf8', fsync: true }); }
+      catch { files.pop(); total -= replaced.count; }
+    }
+    return true;
+  });
+
+  return { ok: true, total, files, truncated: truncated || result.truncated, applied: !dryRun };
+});
+
 ipcMain.handle('workspace:watchStart', (_, dir) => {
   const rootPath = registeredRoot(dir);
   try { if (workspaceWatcher) workspaceWatcher.close(); } catch { /* ignore */ }
@@ -639,7 +743,19 @@ ipcMain.handle('file:read', (_, file) => {
   if (buf.includes(0)) throw new Error('This looks like a binary file.');
   let content = buf.toString('utf8');
   if (content.charCodeAt(0) === 0xFEFF) content = content.slice(1);
-  return { content, mtime: st.mtimeMs, size: st.size };
+  return { content, mtime: st.mtimeMs, mtimeMs: st.mtimeMs, size: st.size };
+});
+
+ipcMain.handle('fs:stat', (_, file) => {
+  let safe;
+  try { safe = assertAllowed(file, true); } catch { return { exists: false, isFile: false, isDirectory: false }; }
+  try {
+    const st = fs.statSync(safe);
+    return {
+      exists: true, isFile: st.isFile(), isDirectory: st.isDirectory(),
+      size: st.size, mtime: st.mtimeMs, mtimeMs: st.mtimeMs
+    };
+  } catch { return { exists: false, isFile: false, isDirectory: false }; }
 });
 
 ipcMain.handle('file:write', (_, file, content) => {
@@ -647,7 +763,8 @@ ipcMain.handle('file:write', (_, file, content) => {
   if (typeof content !== 'string') throw new Error('Invalid file contents.');
   if (content.length > 50 * 1024 * 1024) throw new Error('File is too large to save.');
   writeFileAtomic.sync(p, content, { encoding: 'utf8', fsync: true });
-  return { mtime: fs.statSync(p).mtimeMs };
+  const st = fs.statSync(p);
+  return { mtime: st.mtimeMs, mtimeMs: st.mtimeMs, size: st.size };
 });
 
 ipcMain.handle('file:new', async (_, rootPath) => {
@@ -694,17 +811,33 @@ ipcMain.handle('file:reveal', (_, file) => {
 
 ipcMain.handle('git:status', async (_, cwd) => {
   const dir = registeredRoot(cwd);
-  const inside = await git(dir, ['rev-parse', '--is-inside-work-tree'], 10000);
-  if (!inside.ok) return { repo: false, text: inside.text || 'Not a Git repository.' };
-  const [branch, status] = await Promise.all([
-    git(dir, ['branch', '--show-current'], 10000),
-    git(dir, ['status', '--porcelain=v1', '-z'], 30000)
-  ]);
+  const quick = await execGitStatus(dir);
+  if (!quick.ok) {
+    return {
+      isRepo: false, repo: false, branch: '', files: {}, changes: [],
+      text: quick.stderr.trim() || 'Not a Git repository.'
+    };
+  }
+  const parsed = PB.parseGitStatusPorcelain(quick.stdout);
+  const detailed = await git(dir, ['status', '--porcelain=v1', '-z'], 10000);
+  let changes = detailed.ok ? PB.parseGitStatus(detailed.stdout) : [];
+  if (!changes.length && Object.keys(parsed.files).length) {
+    changes = Object.keys(parsed.files).map((file) => {
+      const code = parsed.files[file];
+      const x = code === 'U' ? '?' : code === 'A' ? 'A' : code === 'R' ? 'R' : ' ';
+      const y = code === 'U' ? '?' : code === 'D' ? 'D' : code === 'M' ? 'M' : ' ';
+      return {
+        x, y, path: file, origPath: null, untracked: code === 'U',
+        staged: code !== 'U' && code !== 'M', unstaged: code === 'M' || code === 'U'
+      };
+    });
+  }
   return {
-    repo: true,
-    branch: branch.stdout.trim() || 'HEAD',
-    changes: PB.parseGitStatus(status.stdout),
-    text: status.text
+    isRepo: true, repo: true,
+    branch: parsed.branch || 'HEAD',
+    files: parsed.files,
+    changes,
+    text: quick.stdout.trim()
   };
 });
 
@@ -822,22 +955,41 @@ ipcMain.handle('run:start', async (_, payload) => {
 
   if (runner) { killTree(runner.child); runner = null; }
   const id = ++runSeq;
+  // Python on Windows falls back to the ANSI code page for piped stdout, which
+  // cannot encode box-drawing or emoji characters. Force UTF-8 and unbuffered
+  // output so interactive programs and progress bars behave as expected.
+  const env = { ...process.env };
+  if (/python/i.test(name) || /python/i.test(exe)) {
+    env.PYTHONIOENCODING = 'utf-8';
+    env.PYTHONUTF8 = '1';
+    env.PYTHONUNBUFFERED = '1';
+  }
   let child;
   try {
-    child = spawn(exe, args, { cwd, shell: false, windowsHide: true, env: process.env, stdio: ['ignore', 'pipe', 'pipe'] });
+    child = spawn(exe, args, { cwd, shell: false, windowsHide: true, env, stdio: ['pipe', 'pipe', 'pipe'] });
   } catch (err) {
     throw new Error(err.message);
   }
   const started = Date.now();
   runner = { id, child, name };
-  child.stdout.on('data', (d) => send('run:output', { id, chunk: d.toString() }));
-  child.stderr.on('data', (d) => send('run:output', { id, chunk: d.toString() }));
+  child.stdin.on('error', () => { /* program may exit before reading input */ });
+  // Decode with a stateful decoder so multi-byte UTF-8 characters split across
+  // chunks are not corrupted into replacement characters.
+  const outDecoder = new StringDecoder('utf8');
+  const errDecoder = new StringDecoder('utf8');
+  child.stdout.on('data', (d) => send('run:output', { id, chunk: outDecoder.write(d) }));
+  child.stderr.on('data', (d) => send('run:output', { id, chunk: errDecoder.write(d) }));
+  const flushDecoders = () => {
+    const rest = outDecoder.end() + errDecoder.end();
+    if (rest) send('run:output', { id, chunk: rest });
+  };
   child.on('error', (err) => {
     send('run:output', { id, chunk: '\n' + err.message + '\n' });
     send('run:exit', { id, code: -1, duration: Date.now() - started });
     if (runner && runner.id === id) runner = null;
   });
   child.on('close', (code, signal) => {
+    flushDecoders();
     if (runner && runner.id === id) runner = null;
     send('run:exit', { id, code: code == null ? -1 : code, signal, duration: Date.now() - started });
   });
@@ -846,6 +998,14 @@ ipcMain.handle('run:start', async (_, payload) => {
 
 ipcMain.handle('run:stop', () => {
   if (runner) { killTree(runner.child); runner = null; }
+  return true;
+});
+
+ipcMain.handle('run:input', (_, text) => {
+  if (!runner || !runner.child.stdin || !runner.child.stdin.writable) return false;
+  const data = String(text == null ? '' : text).slice(0, 65536);
+  try { runner.child.stdin.write(data); }
+  catch { return false; }
   return true;
 });
 

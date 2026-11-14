@@ -21,8 +21,13 @@ const S = {
   fileIndexRoot: null,
   searchToken: 0,
   git: null,
+  gitFiles: {},
   gitBusy: false,
   gitTimer: null,
+  focusCheckBusy: false,
+  session: null,
+  sessionTimer: null,
+  cli: null,
   runId: null,
   running: false,
   runBuffer: null,
@@ -43,6 +48,15 @@ const settings = () => S.state.settings;
 const currentEntry = () => (S.current ? S.models.get(S.current) : null);
 const nameOf = (p) => PB.basename(p);
 const notify = (message, type, timeout) => toast(message, type, timeout);
+
+// Monaco cancels in-flight word-highlight requests when the editor model changes.
+// The cancellation rejects with "Canceled"; it is expected during fast tab switches.
+window.addEventListener('unhandledrejection', (event) => {
+  const reason = event && event.reason;
+  const message = reason && reason.message ? reason.message : String(reason || '');
+  const stack = (reason && reason.stack) || '';
+  if (message === 'Canceled' && stack.includes('monaco-editor')) event.preventDefault();
+});
 
 /* ---------------- DOM helpers ---------------- */
 
@@ -308,12 +322,59 @@ function persistSoon() {
   S.persistTimer = setTimeout(() => persistNow(), 250);
 }
 
+function captureCurrentPosition() {
+  const entry = currentEntry();
+  if (!entry || !S.editor) return;
+  const pos = S.editor.getPosition();
+  if (pos) {
+    entry.cursorLine = pos.lineNumber;
+    entry.cursorColumn = pos.column;
+  }
+  entry.scrollTop = S.editor.getScrollTop();
+}
+
+function collectSession() {
+  captureCurrentPosition();
+  const active = currentEntry();
+  const tabs = [];
+  for (const entry of S.models.values()) {
+    if (entry.virtual || !entry.path) continue;
+    tabs.push({
+      path: entry.path,
+      line: entry.cursorLine || 1,
+      column: entry.cursorColumn || 1,
+      scrollTop: entry.scrollTop || 0
+    });
+  }
+  return {
+    version: 1,
+    workspace: S.root,
+    activeTab: active && !active.virtual ? active.path : (tabs[0] ? tabs[0].path : null),
+    tabs: tabs
+  };
+}
+
+function sessionSoon() {
+  if (!S.state) return;
+  clearTimeout(S.sessionTimer);
+  S.sessionTimer = setTimeout(() => {
+    api.session.save(collectSession()).catch(() => {});
+  }, 450);
+}
+
+function sessionNow() {
+  if (!S.state) return Promise.resolve();
+  clearTimeout(S.sessionTimer);
+  return api.session.save(collectSession()).catch(() => {});
+}
+
 function persistNow() {
   if (!S.state) return;
   S.state.lastFolder = S.root;
   S.state.openFiles = Array.from(S.models.values()).filter((e) => !e.virtual && e.path).map((e) => e.path);
   const cur = currentEntry();
   S.state.activeFile = cur && !cur.virtual ? cur.path : null;
+  sessionSoon();
   return api.app.saveState(S.state).catch((err) => toast('Could not save session: ' + err.message, 'error'));
 }
 
@@ -427,6 +488,12 @@ function initMonaco() {
 
     S.editor.onDidChangeCursorPosition((e) => {
       $('position').textContent = 'Ln ' + e.position.lineNumber + ', Col ' + e.position.column;
+      const entry = currentEntry();
+      if (entry) {
+        entry.cursorLine = e.position.lineNumber;
+        entry.cursorColumn = e.position.column;
+        sessionSoon();
+      }
     });
     S.editor.onDidChangeModel(() => updateEol());
     monacoReadyResolve();
@@ -496,6 +563,7 @@ async function loadWorkspace(tree, options) {
   S.fileIndex = null;
   S.fileIndexRoot = null;
   S.git = null;
+  S.gitFiles = {};
   $('workspace').textContent = S.root;
   $('workspace').title = S.root;
   $('workspaceBtn').title = S.root;
@@ -601,6 +669,12 @@ function appendNodes(nodes, host, depth) {
   }
 }
 
+function gitCodeFor(path) {
+  if (!S.root || !path) return null;
+  const rel = PB.normalizePath(relativeToRoot(path));
+  return S.gitFiles[rel] || S.gitFiles[rel.toLowerCase()] || null;
+}
+
 function createTreeRow(node, depth) {
   const row = el('div', 'tree-row ' + (node.dir ? 'dir' : 'file'));
   row.style.setProperty('--depth', depth);
@@ -621,6 +695,10 @@ function createTreeRow(node, depth) {
     row.appendChild(badgeFor(node.path));
   }
   row.appendChild(el('span', 'tree-name', node.name));
+  if (!node.dir) {
+    const code = gitCodeFor(node.path);
+    if (code) row.appendChild(el('span', 'tree-git git-' + code, code));
+  }
 
   row.onclick = (e) => {
     e.stopPropagation();
@@ -926,17 +1004,24 @@ function syncEditorState() {
 function activateEntry(key) {
   const entry = S.models.get(key);
   if (!entry) return;
+  captureCurrentPosition();
   S.current = key;
   hideContextMenu();
   S.editor.updateOptions({ readOnly: !!entry.virtual });
   S.editor.setModel(entry.model);
-  S.current = key;
+  if (!entry.virtual) {
+    const line = PB.clamp(entry.cursorLine || 1, 1, Math.max(1, entry.model.getLineCount()));
+    const column = PB.clamp(entry.cursorColumn || 1, 1, 100000);
+    S.editor.setPosition({ lineNumber: line, column: column });
+    S.editor.setScrollTop(entry.scrollTop || 0);
+  }
   renderTabs();
   renderBreadcrumb();
   updateStatus();
   syncWelcome();
   S.editor.focus();
   persistSoon();
+  sessionSoon();
 }
 
 function openVirtual(label, content) {
@@ -959,7 +1044,9 @@ async function openFile(filePath, line, column) {
       const model = monaco.editor.createModel(res.content, PB.normalizeLanguage(filePath), monaco.Uri.file(filePath));
       entry = {
         key: filePath, path: filePath, model, dirty: false, deleted: false, virtual: false,
-        mtime: res.mtime, size: res.size, saving: false, reloading: false, pendingSave: false,
+        mtime: res.mtimeMs !== undefined ? res.mtimeMs : res.mtime, size: res.size,
+        cursorLine: 1, cursorColumn: 1, scrollTop: 0,
+        saving: false, reloading: false, pendingSave: false,
         recoveryTimer: null, autosaveTimer: null
       };
       S.models.set(filePath, entry);
@@ -973,8 +1060,12 @@ async function openFile(filePath, line, column) {
   activateEntry(entry.key);
   if (line) {
     const pos = { lineNumber: PB.clamp(line, 1, Math.max(1, entry.model.getLineCount())), column: PB.clamp(column || 1, 1, 100000) };
+    entry.cursorLine = pos.lineNumber;
+    entry.cursorColumn = pos.column;
     S.editor.setPosition(pos);
     S.editor.revealPositionInCenter(pos);
+  } else if (entry.scrollTop) {
+    S.editor.setScrollTop(entry.scrollTop);
   }
   S.editor.focus();
 }
@@ -1000,22 +1091,59 @@ function bindModel(entry) {
   });
 }
 
-async function saveFile(entry) {
+async function detectSaveConflict(entry) {
+  if (!entry || !entry.path) return 0;
+  let st;
+  try { st = await api.file.stat(entry.path); } catch { return 0; }
+  if (!st || !st.exists) return 0;
+  const actual = st.mtimeMs !== undefined ? st.mtimeMs : st.mtime;
+  if (!entry.mtime || !actual) return 0;
+  if (Math.abs(actual - entry.mtime) < 1.5) return 0;
+  if (entry.ignoredMtime && Math.abs(actual - entry.ignoredMtime) < 1.5) return 0;
+  return actual;
+}
+
+async function saveFile(entry, options) {
+  options = options || {};
   entry = entry || currentEntry();
   if (!entry || entry.virtual) return true;
   if (entry.saving) { entry.pendingSave = true; return false; }
   clearTimeout(entry.autosaveTimer);
+
+  if (!options.force) {
+    const conflict = await detectSaveConflict(entry);
+    if (conflict) {
+      const answer = await modalChoice(
+        'File changed on disk',
+        '"' + nameOf(entry.path) + '" was modified outside PeaBox. Overwrite the external changes?',
+        [
+          { label: 'Cancel', value: null },
+          { label: 'Reload from Disk', value: 'reload' },
+          { label: 'Overwrite', value: 'overwrite', class: 'primary' }
+        ]
+      );
+      if (answer === 'reload') {
+        try { await reloadEntry(entry); } catch (err) { toast(err.message, 'error'); }
+        return false;
+      }
+      if (answer !== 'overwrite') return false;
+      entry.ignoredMtime = conflict;
+    }
+  }
+
   entry.saving = true;
   const version = entry.model.getVersionId();
   try {
     const res = await api.file.write(entry.path, entry.model.getValue());
-    entry.mtime = res.mtime;
+    entry.mtime = res.mtimeMs !== undefined ? res.mtimeMs : res.mtime;
+    entry.ignoredMtime = null;
     entry.deleted = false;
     if (entry.model.getVersionId() === version) entry.dirty = false;
     await api.recovery.clear(entry.path).catch(() => {});
     updateTab(entry);
     updateDirtyStatus();
     persistSoon();
+    sessionSoon();
     maybeRefreshGit();
     if (entry.model.getVersionId() !== version) {
       const s = settings();
@@ -1114,7 +1242,8 @@ async function reloadEntry(entry) {
   entry.reloading = false;
   entry.dirty = false;
   entry.deleted = false;
-  entry.mtime = res.mtime;
+  entry.mtime = res.mtimeMs !== undefined ? res.mtimeMs : res.mtime;
+  entry.ignoredMtime = null;
   await api.recovery.clear(entry.path).catch(() => {});
   updateTab(entry);
   updateDirtyStatus();
@@ -1153,6 +1282,46 @@ async function onFileChanged(event) {
   catch (err) { toast('Could not reload ' + nameOf(entry.path) + ': ' + err.message, 'error'); }
 }
 
+async function checkExternalChangesOnFocus() {
+  if (S.focusCheckBusy || !S.models.size) return;
+  S.focusCheckBusy = true;
+  const conflicts = [];
+  try {
+    for (const entry of Array.from(S.models.values())) {
+      if (entry.virtual || entry.saving || !entry.path) continue;
+      let st;
+      try { st = await api.file.stat(entry.path); } catch { continue; }
+      if (!st || !st.exists) {
+        if (!entry.deleted) {
+          entry.deleted = true;
+          updateTab(entry);
+          updateDirtyStatus();
+        }
+        continue;
+      }
+      const actual = st.mtimeMs !== undefined ? st.mtimeMs : st.mtime;
+      if (!entry.mtime || !actual || Math.abs(actual - entry.mtime) < 1.5) continue;
+      if (entry.ignoredMtime && Math.abs(actual - entry.ignoredMtime) < 1.5) continue;
+      if (entry.dirty) {
+        entry.externalMtime = actual;
+        conflicts.push(nameOf(entry.path));
+        continue;
+      }
+      try { await reloadEntry(entry); } catch { /* ignore unreadable */ }
+    }
+  } finally {
+    S.focusCheckBusy = false;
+  }
+  if (conflicts.length) {
+    toast(
+      conflicts.length + ' file' + (conflicts.length === 1 ? '' : 's') +
+      ' changed on disk: ' + conflicts.slice(0, 3).join(', ') +
+      (conflicts.length > 3 ? '…' : '') + '. Saving will ask before overwriting.',
+      'warn', 7000
+    );
+  }
+}
+
 /* ---------------- search ---------------- */
 
 function bindSearch() {
@@ -1166,6 +1335,98 @@ function bindSearch() {
   $('searchCase').onclick = () => { $('searchCase').classList.toggle('active'); runSearch(); };
   $('searchWord').onclick = () => { $('searchWord').classList.toggle('active'); runSearch(); };
   $('searchClear').onclick = () => { $('searchInput').value = ''; $('searchCase').classList.remove('active'); $('searchWord').classList.remove('active'); clearResults(); };
+  $('searchReplaceToggle').onclick = () => toggleReplaceRow();
+  $('replaceAllBtn').onclick = () => { replaceAllFlow().catch((err) => toast(err.message, 'error')); };
+  $('replaceInput').addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') { event.preventDefault(); replaceAllFlow().catch((err) => toast(err.message, 'error')); }
+  });
+}
+
+function toggleReplaceRow(force) {
+  const row = $('searchReplaceRow');
+  const show = force === undefined ? row.classList.contains('hidden') : !!force;
+  row.classList.toggle('hidden', !show);
+  $('searchReplaceToggle').classList.toggle('active', show);
+  if (show) setTimeout(() => $('replaceInput').focus(), 30);
+}
+
+function openWorkspaceReplace() {
+  showView('search');
+  toggleReplaceRow(true);
+  setTimeout(() => {
+    const input = $('searchInput').value.trim() ? $('replaceInput') : $('searchInput');
+    input.focus();
+  }, 50);
+}
+
+async function replaceAllFlow() {
+  if (!S.root) { toast('Open a folder first.', 'warn'); return; }
+  const query = $('searchInput').value;
+  if (!query.trim()) { toast('Enter search text first.', 'warn'); return; }
+  const replacement = $('replaceInput').value;
+  const options = {
+    root: S.root, query, replacement,
+    caseSensitive: $('searchCase').classList.contains('active'),
+    wholeWord: $('searchWord').classList.contains('active'),
+    excludes: PB.splitExcludes(settings().excludes)
+  };
+  let preview;
+  try { preview = await api.workspace.replace({ ...options, dryRun: true }); }
+  catch (err) { toast('Replace preview failed: ' + err.message, 'error', 6000); return; }
+  if (!preview.total) { toast('No matches found for "' + query + '".', 'info', 2200); return; }
+
+  const body = el('div');
+  body.appendChild(el('p', null,
+    preview.total + ' match' + (preview.total === 1 ? '' : 'es') + ' in ' +
+    preview.files.length + ' file' + (preview.files.length === 1 ? '' : 's') +
+    (preview.truncated ? ' (limited to 500 files)' : '') + '.'
+  ));
+  const list = el('div', 'modal-list');
+  preview.files.slice(0, 60).forEach((file) => {
+    const item = el('div', 'modal-item');
+    const info = el('div', 'mi-body');
+    info.append(
+      el('div', 'mi-title', relativeToRoot(file.path) || file.rel),
+      el('div', 'mi-sub', file.count + ' match' + (file.count === 1 ? '' : 'es'))
+    );
+    item.appendChild(info);
+    list.appendChild(item);
+  });
+  if (preview.files.length > 60) {
+    list.appendChild(el('div', 'modal-note', '…and ' + (preview.files.length - 60) + ' more files.'));
+  }
+  body.appendChild(list);
+
+  const answer = await showModal({
+    title: 'Replace in files',
+    body,
+    actions: [
+      { label: 'Cancel', value: null },
+      { label: 'Replace ' + preview.total, value: 'replace', class: 'primary' }
+    ]
+  });
+  if (answer !== 'replace') return;
+
+  let result;
+  try { result = await api.workspace.replace({ ...options, dryRun: false }); }
+  catch (err) { toast('Replace failed: ' + err.message, 'error', 7000); return; }
+  toast('Replaced ' + result.total + ' match' + (result.total === 1 ? '' : 'es') +
+    ' in ' + result.files.length + ' file' + (result.files.length === 1 ? '' : 's') + '.', 'success', 5000);
+
+  const changed = new Set((result.files || []).map((f) => PB.normalizePath(f.path).toLowerCase()));
+  for (const entry of Array.from(S.models.values())) {
+    if (entry.virtual || !entry.path || !changed.has(PB.normalizePath(entry.path).toLowerCase())) continue;
+    if (entry.dirty) {
+      toast(nameOf(entry.path) + ' changed on disk and has unsaved edits.', 'warn', 6000);
+      continue;
+    }
+    try { await reloadEntry(entry); } catch { /* keep tab as-is */ }
+  }
+  S.fileIndex = null;
+  S.fileIndexRoot = null;
+  await refreshExplorer();
+  maybeRefreshGit();
+  await runSearch();
 }
 
 function clearResults() {
@@ -1256,6 +1517,47 @@ function maybeRefreshGit() {
   S.gitTimer = setTimeout(() => refreshGit(), 700);
 }
 
+function changeCode(change) {
+  if (!change) return 'M';
+  if (change.untracked) return 'U';
+  const x = change.x || ' ';
+  const y = change.y || ' ';
+  if (x === '?' && y === '?') return 'U';
+  if (x === 'R' || y === 'R' || x === 'C' || y === 'C') return 'R';
+  if (x === 'D' || y === 'D') return 'D';
+  if (x === 'A' || y === 'A') return 'A';
+  return 'M';
+}
+
+function applyGitFiles(st) {
+  const map = {};
+  if (st && st.files && typeof st.files === 'object') {
+    for (const key of Object.keys(st.files)) map[PB.normalizePath(key)] = st.files[key];
+  }
+  if (!Object.keys(map).length && st && Array.isArray(st.changes)) {
+    for (const change of st.changes) {
+      if (!change || !change.path) continue;
+      map[PB.normalizePath(change.path)] = changeCode(change);
+    }
+  }
+  S.gitFiles = map;
+  updateGitTreeBadges();
+}
+
+function updateGitTreeBadges() {
+  for (const row of $$('.tree-row.file')) {
+    const path = row.dataset.path;
+    const old = row.querySelector('.tree-git');
+    if (old) old.remove();
+    const code = gitCodeFor(path);
+    if (!code) continue;
+    const name = row.querySelector('.tree-name');
+    const badge = el('span', 'tree-git git-' + code, code);
+    if (name && name.nextSibling) row.insertBefore(badge, name.nextSibling);
+    else row.appendChild(badge);
+  }
+}
+
 async function refreshGit() {
   if (!S.root) { renderGitNoRepo('Open a folder to use Git.'); return; }
   if (S.gitBusy) { S.gitPending = true; return; }
@@ -1278,12 +1580,15 @@ function renderGitNoRepo(message) {
   $('gitChanges').replaceChildren(el('div', 'git-empty', message));
   $('gitBranch').replaceChildren();
   $('gitStatus').classList.add('hidden');
+  S.gitFiles = {};
+  updateGitTreeBadges();
 }
 
 function renderGit(st) {
   const host = $('gitChanges');
   host.replaceChildren();
   if (!st.repo) { renderGitNoRepo(st.text || 'Not a Git repository.'); return; }
+  applyGitFiles(st);
   const changes = st.changes || [];
   $('gitSummary').textContent = st.branch + ' · ' + (changes.length ? changes.length + ' change' + (changes.length === 1 ? '' : 's') : 'working tree clean');
   const gs = $('gitStatus');
@@ -1504,6 +1809,36 @@ async function updateEncodingStatus() {
 function bindRun() {
   $('runBtn').onclick = runCurrent;
   $('stopBtn').onclick = stopRun;
+  $('runInputRow').addEventListener('submit', (event) => {
+    event.preventDefault();
+    sendRunInput();
+  });
+}
+
+function updateRunInput() {
+  const row = $('runInputRow');
+  if (!row) return;
+  row.classList.toggle('hidden', !S.running || S.panel !== 'outputPane');
+}
+
+function focusRunInput() {
+  setTimeout(() => { if (S.running && S.panel === 'outputPane') $('runInput').focus(); }, 30);
+}
+
+async function sendRunInput() {
+  if (!S.running) { updateRunInput(); return; }
+  const input = $('runInput');
+  const text = input.value;
+  try {
+    const ok = await api.run.input(text + '\n');
+    if (!ok) { toast('The program is not accepting input.', 'warn', 3000); return; }
+  } catch (err) {
+    toast('Could not send input: ' + err.message, 'error', 5000);
+    return;
+  }
+  appendOutput(text + '\n');
+  input.value = '';
+  input.focus();
 }
 
 function runSpecFor(entry) {
@@ -1546,6 +1881,8 @@ async function runCurrent() {
       onRunExit(pending);
       return;
     }
+    updateRunInput();
+    focusRunInput();
     $('runBtn').disabled = true;
     $('stopBtn').disabled = false;
     const rs = $('runStatus');
@@ -1555,6 +1892,7 @@ async function runCurrent() {
     $('status').textContent = 'Running ' + spec.name + '…';
   } catch (err) {
     S.running = false;
+    updateRunInput();
     toast('Run failed: ' + err.message, 'error', 6000);
   }
 }
@@ -1568,6 +1906,8 @@ async function stopRun() {
   $('runStatus').classList.remove('running');
   $('runStatus').textContent = 'Stopped';
   $('status').textContent = 'Run stopped';
+  $('runInput').value = '';
+  updateRunInput();
   appendOutput('\n[stopped]\n');
 }
 
@@ -1588,6 +1928,8 @@ function onRunExit(payload) {
   S.runId = null;
   $('runBtn').disabled = false;
   $('stopBtn').disabled = true;
+  $('runInput').value = '';
+  updateRunInput();
   const ok = payload.code === 0;
   $('runStatus').classList.remove('running');
   $('runStatus').textContent = ok ? 'Finished' : 'Exit ' + payload.code;
@@ -1598,7 +1940,7 @@ function onRunExit(payload) {
 
 function appendOutput(text) {
   const out = $('output');
-  out.textContent += text;
+  out.textContent = PB.applyCarriageReturns(out.textContent, text);
   const pane = $('outputPane');
   pane.scrollTop = pane.scrollHeight;
 }
@@ -1619,6 +1961,7 @@ function showPanel(panelName) {
   $$('.panel-tab').forEach((b) => b.classList.toggle('active', b.dataset.panel === S.panel));
   setHidden($('terminalPane'), S.panel !== 'terminalPane');
   setHidden($('outputPane'), S.panel !== 'outputPane');
+  updateRunInput();
   if (S.panel === 'terminalPane' && S.activeTerminal) setTimeout(() => fitTerminal(S.activeTerminal), 30);
 }
 
@@ -1803,7 +2146,7 @@ async function ensureFileIndex() {
 function commandList() {
   return [
     { id: 'file.new', label: 'File: New File', key: 'Ctrl+N', run: () => fileNewFlow() },
-    { id: 'file.open', label: 'File: Open File…', key: 'Ctrl+Shift+O', run: () => openFilesFlow() },
+    { id: 'file.open', label: 'File: Open File…', key: 'Ctrl+Alt+O', run: () => openFilesFlow() },
     { id: 'workspace.open', label: 'File: Open Folder…', key: 'Ctrl+O', run: () => openWorkspaceDialog() },
     { id: 'file.save', label: 'File: Save', key: 'Ctrl+S', run: () => saveFile() },
     { id: 'file.saveAll', label: 'File: Save All', key: 'Ctrl+Alt+S', run: () => saveAll() },
@@ -1811,15 +2154,22 @@ function commandList() {
     { id: 'file.closeAll', label: 'File: Close All Editors', run: () => closeAll() },
     { id: 'view.explorer', label: 'View: Explorer', key: 'Ctrl+Shift+E', run: () => showView('explorer') },
     { id: 'view.search', label: 'View: Search', key: 'Ctrl+Shift+F', run: () => showView('search') },
+    { id: 'view.replace', label: 'Search: Replace in Files…', key: 'Ctrl+Shift+H', run: () => openWorkspaceReplace() },
     { id: 'view.git', label: 'View: Source Control', key: 'Ctrl+Shift+G', run: () => showView('git') },
     { id: 'view.sidebar', label: 'View: Toggle Sidebar', key: 'Ctrl+B', run: () => toggleSidebar() },
     { id: 'view.panel', label: 'View: Toggle Panel', key: 'Ctrl+J', run: () => togglePanel() },
     { id: 'view.terminal', label: 'View: Toggle Terminal', key: 'Ctrl+`', run: () => terminalToggle() },
     { id: 'view.output', label: 'View: Show Output', run: () => showPanel('outputPane') },
     { id: 'view.theme', label: 'View: Toggle Theme', run: () => toggleTheme() },
+    { id: 'view.wordWrap', label: 'View: Toggle Word Wrap', run: () => toggleWordWrap() },
+    { id: 'view.symbols', label: 'View: Go to Symbol…', key: 'Ctrl+Shift+O', run: () => openPalette('symbols') },
     { id: 'view.zoomIn', label: 'View: Increase Editor Font Size', key: 'Ctrl+=', run: () => zoomEditor(1) },
     { id: 'view.zoomOut', label: 'View: Decrease Editor Font Size', key: 'Ctrl+-', run: () => zoomEditor(-1) },
     { id: 'view.zoomReset', label: 'View: Reset Editor Font Size', key: 'Ctrl+0', run: () => zoomEditor(0) },
+    { id: 'transform.json', label: 'Transform: Format JSON', run: () => applyTextTransform('format-json') },
+    { id: 'transform.sort', label: 'Transform: Sort Lines Ascending', run: () => applyTextTransform('sort-lines') },
+    { id: 'transform.dedupe', label: 'Transform: Remove Duplicate Lines', run: () => applyTextTransform('dedupe-lines') },
+    { id: 'transform.trim', label: 'Transform: Trim Trailing Whitespace', run: () => applyTextTransform('trim-trailing-whitespace') },
     { id: 'app.settings', label: 'Preferences: Open Settings', key: 'Ctrl+,', run: () => openSettings() },
     { id: 'app.shortcuts', label: 'Help: Keyboard Shortcuts', run: () => showShortcuts() },
     { id: 'git.refresh', label: 'Git: Refresh', run: () => refreshGit() },
@@ -1840,6 +2190,29 @@ function commandList() {
     { id: 'editor.gotoLine', label: 'Editor: Go to Line…', key: 'Ctrl+G', run: () => editorAction('editor.action.gotoLine') },
     { id: 'editor.format', label: 'Editor: Format Document', key: 'Shift+Alt+F', run: () => editorAction('editor.action.formatDocument') }
   ];
+}
+
+function toggleWordWrap() {
+  const s = settings();
+  s.wordWrap = !s.wordWrap;
+  applyEditorOptions();
+  persistSoon();
+  toast('Word wrap ' + (s.wordWrap ? 'enabled' : 'disabled'), 'info', 1600);
+}
+
+function applyTextTransform(id) {
+  const entry = currentEntry();
+  if (!entry) { toast('Open a file to transform.', 'warn'); return; }
+  if (entry.virtual) { toast('Diff views cannot be transformed.', 'warn'); return; }
+  const before = entry.model.getValue();
+  const result = PB.transformText(before, id, { indent: settings().tabSize });
+  if (!result.ok) { toast('Transform failed: ' + result.error, 'error', 6000); return; }
+  if (!result.changed) { toast('No changes needed.', 'info', 1600); return; }
+  const range = entry.model.getFullModelRange();
+  entry.model.pushStackElement();
+  entry.model.pushEditOperations([], [{ range, text: result.text, forceMoveMarkers: true }], () => null);
+  entry.model.pushStackElement();
+  toast('Transformed ' + nameOf(entry.path), 'success', 1800);
 }
 
 function editorAction(id) {
@@ -1879,18 +2252,35 @@ function terminalToggle() {
 
 let paletteToken = 0;
 
+const PALETTE_PLACEHOLDERS = {
+  files: 'Search files by name…',
+  commands: 'Type a command…',
+  symbols: 'Jump to a symbol…'
+};
+
 function paletteModeFromInput(value) {
-  return String(value).replace(/^\s+/, '').startsWith('>') ? 'commands' : 'files';
+  const clean = String(value).replace(/^\s+/, '');
+  if (clean.charAt(0) === '>') return 'commands';
+  if (clean.charAt(0) === '@') return 'symbols';
+  return 'files';
+}
+
+function paletteQuery(value, mode) {
+  const source = String(value);
+  if (mode === 'commands') return source.replace(/^\s*>\s*/, '').trim();
+  if (mode === 'symbols') return source.replace(/^\s*@\s*/, '').trim();
+  return source.trim();
 }
 
 async function openPalette(mode) {
-  const input = $('paletteInput');
+  const input = $('command-palette-input');
+  const target = mode === 'commands' ? 'commands' : mode === 'symbols' ? 'symbols' : 'files';
   S.palette.open = true;
   S.palette.index = 0;
-  S.palette.mode = mode === 'commands' ? 'commands' : 'files';
-  input.value = S.palette.mode === 'commands' ? '>' : '';
-  input.placeholder = S.palette.mode === 'commands' ? 'Type a command…' : 'Search files by name…';
-  $('palette').classList.remove('hidden');
+  S.palette.mode = target;
+  input.value = target === 'commands' ? '>' : target === 'symbols' ? '@' : '';
+  input.placeholder = PALETTE_PLACEHOLDERS[target];
+  $('command-palette-overlay').classList.remove('hidden');
   hideContextMenu();
   await renderPalette();
   setTimeout(() => {
@@ -1904,31 +2294,74 @@ function closePalette() {
   if (!S.palette.open) return;
   S.palette.open = false;
   paletteToken++;
-  $('palette').classList.add('hidden');
+  $('command-palette-overlay').classList.add('hidden');
   S.palette.items = [];
   S.palette.index = 0;
 }
 
+function jumpToSymbol(symbol) {
+  const entry = currentEntry();
+  if (!entry || !S.editor) return;
+  const line = PB.clamp(symbol.line || 1, 1, Math.max(1, entry.model.getLineCount()));
+  const column = PB.clamp(symbol.column || 1, 1, 100000);
+  entry.cursorLine = line;
+  entry.cursorColumn = column;
+  const pos = { lineNumber: line, column: column };
+  S.editor.setPosition(pos);
+  S.editor.revealPositionInCenter(pos);
+  S.editor.focus();
+  updatePositionStatus();
+  sessionSoon();
+}
+
+function symbolPaletteItems(query) {
+  const entry = currentEntry();
+  if (!entry) return [];
+  const extension = entry.virtual ? '' : PB.extname(entry.path);
+  const symbols = PB.extractDocumentSymbols(entry.model.getValue(), extension);
+  const scored = [];
+  for (const symbol of symbols) {
+    const match = query ? PB.fuzzyMatch(query, symbol.name) : { score: 0, positions: [] };
+    if (!match) continue;
+    scored.push({ symbol, match });
+  }
+  scored.sort((a, b) => b.match.score - a.match.score || a.symbol.line - b.symbol.line);
+  return scored.map(({ symbol, match }) => ({
+    id: 'symbol:' + symbol.line + ':' + symbol.name,
+    label: symbol.name,
+    kind: symbol.kind,
+    detail: symbol.detail,
+    line: symbol.line,
+    positions: match.positions,
+    run: () => jumpToSymbol(symbol)
+  }));
+}
+
 async function renderPalette() {
   const token = ++paletteToken;
-  const value = $('paletteInput').value;
+  const input = $('command-palette-input');
+  const value = input.value;
   const mode = paletteModeFromInput(value);
-  const query = mode === 'commands' ? value.replace(/^\s*>\s*/, '') : value;
+  const query = paletteQuery(value, mode);
   S.palette.mode = mode;
-  $('paletteInput').placeholder = mode === 'commands' ? 'Type a command…' : 'Search files by name…';
+  input.placeholder = PALETTE_PLACEHOLDERS[mode];
 
   let items = [];
   if (mode === 'commands') {
-    items = commandList().map((c) => {
-      const match = query ? PB.fuzzyMatch(query, c.label) : { score: 0 };
-      return { item: { id: c.id, label: c.label, key: c.key, run: c.run }, match };
-    }).filter((x) => x.match)
-      .sort((a, b) => b.match.score - a.match.score)
-      .slice(0, 80)
-      .map((x) => x.item);
+    items = PB.fuzzyMatchCommands(query, commandList(), 80).map((c) => ({
+      id: c.id, label: c.label, key: c.key, run: c.run, positions: c.positions
+    }));
+  } else if (mode === 'symbols') {
+    items = symbolPaletteItems(query).slice(0, 200);
+    if (!currentEntry()) {
+      $('command-palette-results').replaceChildren(el('div', 'search-empty', 'Open a file to list its symbols.'));
+      $('command-palette-hint').textContent = 'Esc to close';
+      S.palette.items = [];
+      return;
+    }
   } else if (!S.root) {
-    $('paletteList').replaceChildren(el('div', 'search-empty', 'Open a folder to search files.'));
-    $('paletteHint').textContent = '';
+    $('command-palette-results').replaceChildren(el('div', 'search-empty', 'Open a folder to search files.'));
+    $('command-palette-hint').textContent = '';
     S.palette.items = [];
     return;
   } else {
@@ -1936,16 +2369,8 @@ async function renderPalette() {
     try { files = await ensureFileIndex(); }
     catch (err) { toast('Could not build file list: ' + err.message, 'error'); }
     if (token !== paletteToken) return;
-    const scored = [];
-    for (const f of files) {
-      const match = query ? PB.fuzzyMatch(query, f.rel) : { score: 0 };
-      if (!match) continue;
-      scored.push({ f, match });
-      if (!query && scored.length >= 120) break;
-    }
-    scored.sort((a, b) => b.match.score - a.match.score);
-    items = scored.slice(0, 120).map(({ f }) => ({
-      id: f.path, label: PB.basename(f.rel), path: f.rel, run: () => openFile(f.path)
+    items = PB.fuzzyMatchFiles(query, files, 150).map((f) => ({
+      id: f.path, label: f.name, path: f.rel, positions: f.positions, run: () => openFile(f.path)
     }));
   }
 
@@ -1956,35 +2381,44 @@ async function renderPalette() {
 }
 
 function renderPaletteList(items, query, mode) {
-  const host = $('paletteList');
+  const host = $('command-palette-results');
   host.replaceChildren();
   if (!items.length) {
-    host.appendChild(el('div', 'search-empty', mode === 'commands' ? 'No matching commands.' : 'No matching files.'));
-    $('paletteHint').textContent = mode === 'files' && !S.root ? '' : 'Esc to close';
+    const message = mode === 'commands' ? 'No matching commands.'
+      : mode === 'symbols' ? 'No matching symbols.' : 'No matching files.';
+    host.appendChild(el('div', 'search-empty', message));
+    $('command-palette-hint').textContent = mode === 'files' && !S.root ? '' : 'Esc to close';
     return;
   }
+  const rowIcon = mode === 'commands' ? 'palette' : mode === 'symbols' ? 'list' : 'file';
   items.forEach((item, index) => {
     const row = el('div', 'palette-item' + (index === S.palette.index ? ' active' : ''));
     row.setAttribute('role', 'option');
     row.setAttribute('aria-selected', index === S.palette.index ? 'true' : 'false');
-    row.appendChild(icon(mode === 'commands' ? 'palette' : 'file'));
+    row.appendChild(icon(rowIcon));
     const name = el('span', 'p-name');
-    appendMatch(name, item.label, query, mode === 'commands');
+    appendMatch(name, item.label, query, mode !== 'files', item.positions);
     row.appendChild(name);
     if (item.path) row.appendChild(el('span', 'p-path', item.path));
+    if (mode === 'symbols') {
+      row.appendChild(el('span', 'p-kind', item.kind || 'symbol'));
+      row.appendChild(el('span', 'p-line', 'Ln ' + item.line));
+    }
     if (item.key) row.appendChild(el('span', 'p-key', item.key));
     row.onmouseenter = () => { S.palette.index = index; markPaletteActive(); };
     row.onclick = () => { S.palette.index = index; paletteAccept(); };
     host.appendChild(row);
   });
-  $('paletteHint').textContent = items.length + ' result' + (items.length === 1 ? '' : 's') + ' · Enter to open · ↑↓ to navigate · Esc to close';
+  const verb = mode === 'symbols' ? 'jump' : 'open';
+  $('command-palette-hint').textContent = items.length + ' result' + (items.length === 1 ? '' : 's') +
+    ' · Enter to ' + verb + ' · ↑↓ to navigate · Esc to close';
   markPaletteActive(true);
 }
 
-function appendMatch(host, text, query, fuzzy) {
+function appendMatch(host, text, query, fuzzy, knownPositions) {
   if (!query) { host.textContent = text; return; }
   if (fuzzy) {
-    const match = PB.fuzzyMatch(query, text);
+    const match = knownPositions ? { positions: knownPositions } : PB.fuzzyMatch(query, text);
     if (match) {
       const positions = new Set(match.positions);
       let buffer = '';
@@ -2001,7 +2435,7 @@ function appendMatch(host, text, query, fuzzy) {
 }
 
 function markPaletteActive(scroll) {
-  const rows = $$('.palette-item', $('paletteList'));
+  const rows = $$('.palette-item', $('command-palette-results'));
   rows.forEach((row, index) => {
     const active = index === S.palette.index;
     row.classList.toggle('active', active);
@@ -2027,7 +2461,7 @@ function paletteAccept() {
 }
 
 function bindPalette() {
-  const input = $('paletteInput');
+  const input = $('command-palette-input');
   input.addEventListener('input', () => { S.palette.index = 0; renderPalette(); });
   input.addEventListener('keydown', (event) => {
     if (event.key === 'ArrowDown') { event.preventDefault(); paletteMove(1); }
@@ -2035,8 +2469,8 @@ function bindPalette() {
     else if (event.key === 'Enter') { event.preventDefault(); paletteAccept(); }
     else if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); closePalette(); }
   });
-  $('palette').addEventListener('pointerdown', (event) => {
-    if (event.target === $('palette')) closePalette();
+  $('command-palette-overlay').addEventListener('pointerdown', (event) => {
+    if (event.target === $('command-palette-overlay')) closePalette();
   });
 }
 
@@ -2213,6 +2647,8 @@ function showShortcuts() {
   const rows = [
     ['Quick open files', 'Ctrl+P'],
     ['Command palette', 'Ctrl+Shift+P'],
+    ['Go to symbol', 'Ctrl+Shift+O'],
+    ['Open file', 'Ctrl+Alt+O'],
     ['Open folder', 'Ctrl+O'],
     ['Save', 'Ctrl+S'],
     ['Save all', 'Ctrl+Alt+S'],
@@ -2222,6 +2658,7 @@ function showShortcuts() {
     ['Terminal', 'Ctrl+`'],
     ['Explorer', 'Ctrl+Shift+E'],
     ['Search', 'Ctrl+Shift+F'],
+    ['Replace in files', 'Ctrl+Shift+H'],
     ['Source control', 'Ctrl+Shift+G'],
     ['Settings', 'Ctrl+,'],
     ['Run current file', 'F5'],
@@ -2318,6 +2755,7 @@ async function handleCloseRequest() {
   S.closePrompt = true;
   try {
     await persistNow();
+    await sessionNow();
     const dirty = Array.from(S.models.values()).filter((e) => e.dirty && !e.virtual);
     if (!dirty.length) { await api.app.close('close'); return; }
     const answer = await modalChoice(
@@ -2359,8 +2797,11 @@ function handleMenuCommand(payload) {
     'app.shortcuts': () => showShortcuts(),
     'palette.commands': () => openPalette('commands'),
     'palette.files': () => openPalette('files'),
+    'palette.symbols': () => openPalette('symbols'),
     'view.explorer': () => showView('explorer'),
     'view.search': () => showView('search'),
+    'view.replace': () => openWorkspaceReplace(),
+    'view.wordWrap': () => toggleWordWrap(),
     'view.git': () => showView('git'),
     'view.sidebar': () => toggleSidebar(),
     'view.panel': () => togglePanel(),
@@ -2403,9 +2844,11 @@ function onKeyDown(event) {
   if (mod && event.shiftKey && lower === 'p') { event.preventDefault(); openPalette('commands'); return; }
   if (mod && !event.shiftKey && lower === 'p') { event.preventDefault(); openPalette('files'); return; }
   if (mod && event.shiftKey && lower === 'f') { event.preventDefault(); showView('search'); return; }
+  if (mod && event.shiftKey && lower === 'h') { event.preventDefault(); openWorkspaceReplace(); return; }
   if (mod && event.shiftKey && lower === 'e') { event.preventDefault(); showView('explorer'); return; }
   if (mod && event.shiftKey && lower === 'g') { event.preventDefault(); showView('git'); return; }
-  if (mod && event.shiftKey && lower === 'o') { event.preventDefault(); openFilesFlow(); return; }
+  if (mod && event.shiftKey && lower === 'o') { event.preventDefault(); openPalette('symbols'); return; }
+  if (mod && event.altKey && lower === 'o') { event.preventDefault(); openFilesFlow(); return; }
   if (mod && !event.shiftKey && lower === 'o') { event.preventDefault(); openWorkspaceDialog(); return; }
   if (mod && !event.shiftKey && lower === 's') { event.preventDefault(); if (event.altKey) saveAll(); else saveFile(); return; }
   if (mod && !event.shiftKey && lower === 'n') { event.preventDefault(); fileNewFlow(); return; }
@@ -2494,7 +2937,14 @@ function bindEvents() {
 
   document.addEventListener('keydown', onKeyDown, true);
   window.addEventListener('resize', () => { if (S.activeTerminal) fitTerminal(S.activeTerminal); });
-  window.addEventListener('beforeunload', () => { try { persistNow(); } catch { /* ignore */ } });
+  window.addEventListener('focus', () => {
+    checkExternalChangesOnFocus().catch(() => {});
+    maybeRefreshGit();
+    sessionSoon();
+  });
+  window.addEventListener('beforeunload', () => {
+    try { persistNow(); sessionNow(); } catch { /* ignore */ }
+  });
 }
 
 function bindSubscriptions() {
@@ -2509,17 +2959,39 @@ function bindSubscriptions() {
 }
 
 async function restoreSession() {
-  if (!S.state) return;
-  if (S.state.lastFolder) {
-    await openWorkspacePath(S.state.lastFolder);
-  }
+  let session = null;
+  try { session = await api.session.load(); } catch { /* fall back to state.json */ }
+  const cli = S.cli;
+
+  let workspace = session && session.workspace ? session.workspace : (S.state && S.state.lastFolder);
+  if (cli && cli.isDir) workspace = cli.path;
+  if (workspace) await openWorkspacePath(workspace);
+
   if (S.state.gitMessage) $('commitMessage').value = S.state.gitMessage;
-  const files = Array.isArray(S.state.openFiles) ? S.state.openFiles : [];
-  for (const file of files) {
+
+  const savedTabs = session && Array.isArray(session.tabs) ? session.tabs : [];
+  const tabs = savedTabs.length
+    ? savedTabs
+    : (Array.isArray(S.state.openFiles) ? S.state.openFiles : []).map((p) => ({ path: p, line: 1, column: 1, scrollTop: 0 }));
+
+  for (const tab of tabs) {
     if (!S.editor) break;
-    try { await openFile(file); } catch { /* skip unavailable */ }
+    if (!tab || !tab.path) continue;
+    try { await openFile(tab.path); } catch { /* skip unavailable */ }
+    const entry = S.models.get(tab.path);
+    if (!entry) continue;
+    entry.cursorLine = tab.line || 1;
+    entry.cursorColumn = tab.column || 1;
+    entry.scrollTop = tab.scrollTop || 0;
   }
-  if (S.state.activeFile && S.models.has(S.state.activeFile)) activateEntry(S.state.activeFile);
+
+  const cliFile = cli && !cli.isDir ? cli.path : null;
+  if (cliFile) {
+    try { await openFile(cliFile); } catch { /* ignore unreadable */ }
+  }
+
+  const active = (session && session.activeTab) || (S.state && S.state.activeFile) || cliFile;
+  if (active && S.models.has(active)) activateEntry(active);
   else if (S.models.size) activateEntry(Array.from(S.models.keys())[S.models.size - 1]);
   syncEditorState();
 }
@@ -2539,6 +3011,9 @@ async function boot() {
   bindResizers();
   bindPalette();
   bindSubscriptions();
+
+  const info = await api.app.info().catch(() => null);
+  if (info) S.cli = info.cli || null;
 
   try {
     S.state = await api.app.loadState();
@@ -2566,7 +3041,6 @@ async function boot() {
 
   try { await offerRecovery(); } catch { /* ignore */ }
 
-  const info = await api.app.info().catch(() => null);
   if (info) {
     $('status').textContent = 'PeaBox IDE ' + info.version + ' · Electron ' + info.electron;
     setTimeout(() => { if (!S.running) $('status').textContent = 'Ready'; }, 5000);

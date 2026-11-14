@@ -189,3 +189,194 @@ test('normalizeLineEndings converts mixed endings', () => {
   assert.equal(PB.normalizeLineEndings('a\nb\nc', 'crlf'), 'a\r\nb\r\nc');
   assert.equal(PB.normalizeLineEndings('a\r\nb\n', 'cr'), 'a\rb\r');
 });
+
+test('escapeRegExp escapes every regular expression metacharacter', () => {
+  const raw = 'a.b*c+?[^]$(){}=!|\\';
+  const escaped = PB.escapeRegExp(raw);
+  assert.equal(new RegExp('^' + escaped + '$').test(raw), true);
+  assert.equal(new RegExp('^' + escaped + '$').test('a.bc'), false);
+});
+
+test('scorePathMatch favours exact file stems over loose matches', () => {
+  const exact = PB.scorePathMatch('app', 'src/app.js', 'app.js');
+  const loose = PB.scorePathMatch('app', 'src/application.js', 'application.js');
+  assert.ok(exact.score > loose.score);
+  assert.deepEqual(exact.positions, [4, 5, 6]);
+  assert.equal(PB.scorePathMatch('zzz', 'src/app.js', 'app.js'), null);
+});
+
+test('fuzzyMatchFiles orders by score, normalizes paths and honours limit', () => {
+  const files = [
+    'README.md',
+    'src/apple.txt',
+    { path: 'C:\\work\\src\\app.js', rel: 'src/app.js', name: 'app.js' },
+    'src/App.css'
+  ];
+  const results = PB.fuzzyMatchFiles('app', files, 10);
+  assert.equal(results.length, 3);
+  assert.equal(results[0].rel, 'src/app.js');
+  assert.equal(results[0].path, 'C:\\work\\src\\app.js');
+  assert.ok(results[0].score > results[2].score);
+  assert.equal(PB.fuzzyMatchFiles('app', files, 1).length, 1);
+});
+
+test('fuzzyMatchCommands preserves command objects and supports empty queries', () => {
+  const commands = [
+    { id: 'save', label: 'File: Save', key: 'Ctrl+S' },
+    { id: 'saveAll', label: 'File: Save All', key: 'Ctrl+Alt+S' },
+    { id: 'toggle', label: 'View: Toggle Panel' }
+  ];
+  const results = PB.fuzzyMatchCommands('save', commands);
+  assert.deepEqual(results.map((c) => c.id), ['save', 'saveAll']);
+  assert.equal(results[0].key, 'Ctrl+S');
+  assert.equal(PB.fuzzyMatchCommands('', commands).length, 3);
+  assert.equal(PB.fuzzyMatchCommands('zzz', commands).length, 0);
+});
+
+test('parseGitStatusPorcelain reports branch and per-file status codes', () => {
+  const raw = [
+    '## feature/login...origin/feature/login [ahead 2]',
+    ' M src/app.js',
+    '?? notes.txt',
+    'A  staged.py',
+    'R  old.js -> new.js',
+    ' D gone.txt',
+    ' M "dir/space file.txt"',
+    ''
+  ].join('\n');
+  const status = PB.parseGitStatusPorcelain(raw);
+  assert.equal(status.branch, 'feature/login');
+  assert.deepEqual(status.files, {
+    'src/app.js': 'M',
+    'notes.txt': 'U',
+    'staged.py': 'A',
+    'new.js': 'R',
+    'gone.txt': 'D',
+    'dir/space file.txt': 'M'
+  });
+  assert.deepEqual(PB.parseGitStatusPorcelain('## No commits yet on main\n'), {
+    branch: 'main', files: {}
+  });
+});
+
+test('extractDocumentSymbols finds JavaScript declarations and methods', () => {
+  const content = [
+    'class Widget {',
+    '  constructor() {}',
+    '  render() {}',
+    '}',
+    'export async function loadData() {}',
+    'const handler = async (event) => {};'
+  ].join('\n');
+  const symbols = PB.extractDocumentSymbols(content, '.js');
+  assert.deepEqual(symbols.map((s) => [s.name, s.kind, s.line]), [
+    ['Widget', 'class', 1],
+    ['constructor', 'method', 2],
+    ['render', 'method', 3],
+    ['loadData', 'function', 5],
+    ['handler', 'function', 6]
+  ]);
+});
+
+test('extractDocumentSymbols finds Python and Markdown symbols', () => {
+  const py = [
+    'class Greeter:',
+    '    def greet(self, name):',
+    '        return name',
+    '',
+    'async def main():',
+    '    pass'
+  ].join('\n');
+  const symbols = PB.extractDocumentSymbols(py, 'py');
+  assert.deepEqual(symbols.map((s) => [s.name, s.kind, s.line, s.column]), [
+    ['Greeter', 'class', 1, 7],
+    ['greet', 'method', 2, 9],
+    ['main', 'function', 5, 11]
+  ]);
+
+  const md = '# Title\n\n## **Section**\n';
+  assert.deepEqual(
+    PB.extractDocumentSymbols(md, 'md').map((s) => [s.name, s.kind, s.detail]),
+    [['Title', 'heading', 'h1'], ['Section', 'heading', 'h2']]
+  );
+});
+
+test('formatJsonText pretty-prints valid JSON and reports errors', () => {
+  const ok = PB.formatJsonText('{"b":1,"a":[2]}', 2);
+  assert.equal(ok.ok, true);
+  assert.equal(ok.text, '{\n  "b": 1,\n  "a": [\n    2\n  ]\n}');
+  const emptyIndent = PB.formatJsonText('{"a":1}', 0);
+  assert.equal(emptyIndent.text, '{"a":1}');
+  const bad = PB.formatJsonText('{nope');
+  assert.equal(bad.ok, false);
+  assert.ok(bad.error);
+});
+
+test('sortLines, dedupeLines and trimTrailingWhitespace preserve trailing newlines', () => {
+  assert.equal(PB.sortLines('b\nA\nc\n'), 'A\nb\nc\n');
+  assert.equal(PB.sortLines('b\nA\nc\n', { descending: true }), 'c\nb\nA\n');
+  assert.equal(PB.sortLines('b\nA\nc\n', { caseSensitive: true }), 'A\nb\nc\n');
+  assert.equal(PB.dedupeLines('a\na\nB\nb\n', { caseSensitive: false }), 'a\nB\n');
+  assert.equal(PB.dedupeLines('a\na\nB\nb\n'), 'a\nB\nb\n');
+  assert.equal(PB.trimTrailingWhitespace('a  \r\nb\t\nc '), 'a\r\nb\nc');
+});
+
+test('transformText applies named transforms and rejects unknown ids', () => {
+  const sorted = PB.transformText('b\na\n', 'sort-lines');
+  assert.deepEqual(sorted, { ok: true, text: 'a\nb\n', changed: true });
+  assert.equal(PB.transformText('a\nb\n', 'trim-trailing-whitespace').changed, false);
+  assert.equal(PB.transformText('{"a":1}', 'format-json').ok, true);
+  assert.equal(PB.transformText('x', 'does-not-exist').ok, false);
+});
+
+test('applyCarriageReturns overwrites the current line for progress bars', () => {
+  assert.equal(PB.applyCarriageReturns('', 'one\ntwo'), 'one\ntwo');
+  assert.equal(
+    PB.applyCarriageReturns('Progress: [█] 5%', '\rProgress: [██] 10%'),
+    'Progress: [██] 10%'
+  );
+  // A shorter rewrite leaves the tail of the old line, exactly like a terminal.
+  assert.equal(PB.applyCarriageReturns('Hello', '\rHi'), 'Hillo');
+  // Incoming CRLF is normalised to a single newline.
+  assert.equal(PB.applyCarriageReturns('a\r\nb', '\r\nc'), 'a\r\nb\nc');
+  assert.equal(PB.applyCarriageReturns('x', ''), 'x');
+  assert.equal(PB.applyCarriageReturns('done', '\nnext'), 'done\nnext');
+});
+
+test('replaceInText supports case and whole-word options', () => {
+  assert.deepEqual(
+    PB.replaceInText('cat scatter Cat', 'cat', 'dog', { wholeWord: true }),
+    { text: 'dog scatter dog', count: 2 }
+  );
+  assert.deepEqual(
+    PB.replaceInText('cat Cat', 'cat', 'dog', { caseSensitive: true }),
+    { text: 'dog Cat', count: 1 }
+  );
+  assert.deepEqual(PB.replaceInText('abc', '', 'x'), { text: 'abc', count: 0 });
+});
+
+test('defaultSession and sanitizeSession enforce the persisted schema', () => {
+  assert.deepEqual(PB.defaultSession(), { version: 1, workspace: null, activeTab: null, tabs: [] });
+
+  const session = PB.sanitizeSession({
+    version: 9,
+    workspace: 'C:\\work',
+    activeTab: 'C:\\work\\a.js',
+    tabs: [
+      { path: 'C:\\work\\a.js', line: 3, column: 2, scrollTop: 40 },
+      { path: 'C:\\work\\a.js', line: 9 },
+      { path: '', line: 1 },
+      { nope: true },
+      { path: 'C:\\work\\b.js', line: -5, column: 'x', scrollTop: -2 }
+    ]
+  });
+  assert.equal(session.version, 1);
+  assert.equal(session.workspace, 'C:\\work');
+  assert.equal(session.activeTab, 'C:\\work\\a.js');
+  assert.deepEqual(session.tabs, [
+    { path: 'C:\\work\\a.js', line: 3, column: 2, scrollTop: 40 },
+    { path: 'C:\\work\\b.js', line: 1, column: 1, scrollTop: 0 }
+  ]);
+  assert.deepEqual(PB.sanitizeSession(null), PB.defaultSession());
+  assert.deepEqual(PB.sanitizeSession('bad'), PB.defaultSession());
+});

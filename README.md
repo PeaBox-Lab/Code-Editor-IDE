@@ -1,4 +1,4 @@
-# PeaBox IDE v0.16.0
+# PeaBox IDE v0.17.0
 
 A fast, local-first desktop code editor built with Electron. PeaBox focuses on the
 everyday loop: open a folder, edit, search, review Git changes, run code, and use a
@@ -14,14 +14,29 @@ real terminal — without sending your source anywhere.
   copy path and reveal in Explorer.
 - **Search** — async, chunked full-text search with match-case and whole-word
   options, grouped results, highlighted snippets, and click-to-jump to line/column.
-- **Quick open & command palette** — `Ctrl+P` fuzzy-searches every file in the
-  workspace; `Ctrl+Shift+P` runs any command.
+  **Replace in files** previews matches before applying them, respects the same
+  search exclusions, and reloads affected editor tabs afterwards.
+- **Unified palette** — `Ctrl+P` fuzzy-searches every file in the workspace,
+  `Ctrl+Shift+P` runs any command, and `Ctrl+Shift+O` jumps to symbols in the active
+  document. The same palette switches modes inline with `>` and `@`; ArrowUp,
+  ArrowDown, Enter, and Escape are fully supported.
 - **Source control** — branch switching and creation, staged/unstaged sections,
   per-file stage/unstage/discard, diff viewer, commit, pull, push, **fetch** (with a
   dedicated Fetch button), stash and pop. Git runs through argument arrays with
-  `shell: false` and no interactive prompts.
+  `shell: false` and no interactive prompts. Change badges appear on files in the
+  Explorer, and the status bar shows the current branch and change count.
+- **Session restore** — reopens the last workspace, tabs, active tab, cursor
+  position and scroll offset. A folder or file passed on the command line opens
+  directly.
+- **External change protection** — open files are watched on disk and checked
+  again when the window regains focus. Clean buffers reload automatically; dirty
+  buffers prompt before a save overwrites someone else's edits.
 - **Runtimes** — F5 runs the current Python, Node, Go, PowerShell or shell file
   with configurable runtimes. Output streams live; Shift+F5 stops the process tree.
+  When a program asks for input, the Output panel shows an input bar and forwards
+  each line to the running process's stdin. Programs run with a UTF-8 capable
+  environment, so Unicode output (box drawing, emoji, accents) works on Windows;
+  progress bars that use `\r` update in place instead of filling the panel.
   Each runtime row has a **"Check"** button and an **"Auto-Detect"** button that
   populates the path when the runtime is found on PATH or via the configured value.
 - **Encoding & EOL awareness** — the status bar shows the detected file encoding
@@ -33,7 +48,6 @@ real terminal — without sending your source anywhere.
   verified against the bundled Electron runtime, so no C++ toolchain is needed.
 - **Recovery** — unsaved buffers are written to a recovery folder as you type and
   offered back after a crash or forced exit.
-- **Session restore** — reopens the last workspace and the files you had open.
 - **Settings** — theme, typography, tabs, wrapping, minimap, auto-save, terminal
   shell, runtime paths (with a "Check" button), and search exclusions.
 - **Polished UI** — resizable sidebar and panel, status bar, breadcrumbs, toasts,
@@ -46,8 +60,9 @@ real terminal — without sending your source anywhere.
 | --- | --- |
 | Quick open files | `Ctrl+P` |
 | Command palette | `Ctrl+Shift+P` |
+| Go to symbol | `Ctrl+Shift+O` |
 | Open folder | `Ctrl+O` |
-| Open file | `Ctrl+Shift+O` |
+| Open file | `Ctrl+Alt+O` |
 | New file | `Ctrl+N` |
 | Save / Save all | `Ctrl+S` / `Ctrl+Alt+S` |
 | Close editor | `Ctrl+W` |
@@ -55,6 +70,7 @@ real terminal — without sending your source anywhere.
 | Toggle panel | `Ctrl+J` |
 | Toggle terminal | ``Ctrl+` `` |
 | Explorer / Search / Git | `Ctrl+Shift+E` / `F` / `G` |
+| Replace in files | `Ctrl+Shift+H` |
 | Find / Replace / Go to line | `Ctrl+F` / `Ctrl+H` / `Ctrl+G` |
 | Editor font size up / down / reset | `Ctrl+=` / `Ctrl+-` / `Ctrl+0` |
 | Run / Stop | `F5` / `Shift+F5` |
@@ -96,16 +112,20 @@ on `PATH` (or in a local `node\` folder).
 | `renderer.js` | The editor UI (plain classic script; Monaco/xterm are loaded first). |
 | `shared.js` | Dependency-free UMD helpers used by main, renderer and tests. |
 | `index.html` / `style.css` | Markup, icon sprite and the design system. |
-| `tests/unit.test.js` | Unit coverage for the shared helpers. |
-| `tests/electron.spec.js` | End-to-end smoke test, including nested-folder regression. |
+| `tests/unit.test.js` | Unit coverage for the shared helpers, fuzzy matching, symbols, Git parsing and text transforms. |
+| `tests/electron.spec.js` | End-to-end smoke test, including nested-folder regression, quick open and symbol jump. |
 | `tools/validate.js` | Static validation: syntax, DOM ids, icons, IPC parity, security. |
 | `tools/postinstall.js` | Prebuilt node-pty probe with non-fatal rebuild fallback. |
 
 ## Data and safety
 
-- **App state and recovery data** live under Electron's `userData` folder:
-  `%APPDATA%\peabox-ide` for installed builds, or a `PeaBox-IDE-Data` folder next
-  to a portable executable.
+- **App state, hot-exit session and recovery data** live under Electron's `userData`
+  folder: `%APPDATA%\peabox-ide` for installed builds, or a `PeaBox-IDE-Data` folder
+  next to a portable executable. `state.json` stores settings, recent folders and
+  layout; `session.json` stores open tabs, cursor positions and scroll offsets.
+- **External changes** — file watchers and a focus-time `mtime` check detect edits
+  made outside the editor. Clean tabs reload automatically and dirty tabs keep their
+  buffer until you choose Reload or Overwrite.
 - **Path confinement** — every renderer-supplied path is resolved with `realpath`
   and checked against the open workspace roots. Symlinks cannot escape a root.
 - **Sandbox** — the renderer runs sandboxed with context isolation, a strict CSP,

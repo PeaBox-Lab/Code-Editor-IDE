@@ -154,3 +154,14 @@ The old preload exposed raw `ipcRenderer` and the main process trusted any path.
 - **Tests**: 20 unit tests (up from 15), all passing. E2E still passes.
 - **Validation**: 119 DOM ids, 36 icons, 56 IPC handlers.
 - **Artifacts**: `PeaBox-IDE-0.16.0-Windows-x64.exe` (portable) and `PeaBox-IDE-0.16.0-Windows-x64.zip` created.
+
+## v0.17.0 addendum (2026-11-14)
+
+- **New IPC handlers**: `session:load`, `session:save`, `workspace:replace`, `fs:stat`, `run:input`.
+- **New preload API**: `api.session.load/save`, `api.workspace.replace`, `api.file.stat`, `api.run.input`; `api.file.write` accepts an optional expected mtime.
+- **UI**: Unified file/command/symbol palette (`Ctrl+P`, `Ctrl+Shift+P`, `Ctrl+Shift+O`), preview-first replace row in Search (`Ctrl+Shift+H`), Explorer Git status badges, full tab/cursor/scroll session restore, and an Input bar in the Output panel for interactive runs.
+- **Safety**: Focus-time external change detection with reload/overwrite prompts; `git:status` now uses `execFile` with a 3000 ms timeout; `run:input` writes only to the active run and caps submissions at 64 KB.
+- **Run output**: Python processes inherit `PYTHONIOENCODING=utf-8`/`PYTHONUTF8=1`/`PYTHONUNBUFFERED=1`, stdout/stderr use stateful UTF-8 decoding, and `\r` progress updates overwrite the current line instead of appending.
+- **Shared module**: New fuzzy file/command matchers, `parseGitStatusPorcelain`, `extractDocumentSymbols`, text transforms, literal replacement and session sanitisation, all unit-tested.
+- **Tests**: 32 unit tests (up from 20), all passing. E2E now covers quick open, symbol jump and interactive run input.
+- **Validation**: 125 DOM ids, 36 icons, 61 IPC handlers.

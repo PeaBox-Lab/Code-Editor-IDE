@@ -171,6 +171,15 @@ kbd {
 .tree-row .folder-icon { width: 15px; height: 15px; color: #e0b45c; }
 .tree-row .tree-name { overflow: hidden; text-overflow: ellipsis; flex: 1; }
 .tree-row .tree-note { font-size: 10px; color: var(--faint); }
+.tree-git {
+  flex: none; font: 700 9px/1 "Segoe UI", sans-serif; min-width: 14px; height: 14px;
+  display: inline-grid; place-items: center; border-radius: 3px; letter-spacing: .2px;
+}
+.tree-git.git-M { color: var(--yellow); background: rgba(242, 201, 76, .13); }
+.tree-git.git-U { color: var(--green); background: rgba(62, 207, 142, .13); }
+.tree-git.git-A { color: var(--green); background: rgba(62, 207, 142, .13); }
+.tree-git.git-D { color: var(--red); background: rgba(255, 107, 129, .13); }
+.tree-git.git-R { color: var(--accent-2); background: rgba(138, 107, 255, .15); }
 .tree-children { display: block; }
 .tree-children.loading { padding: 3px 0 3px 30px; color: var(--faint); font-style: italic; font-size: 11px; }
 .file-badge {
@@ -202,6 +211,11 @@ kbd {
   border-radius: 5px; color: var(--faint); font-size: 11px; font-weight: 700;
 }
 .toggle.active { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); }
+.replace-btn {
+  flex: none; background: var(--accent-soft); border: 1px solid var(--accent); border-radius: 5px;
+  color: var(--accent); padding: 6px 9px; font-size: 11px; font-weight: 600;
+}
+.replace-btn:hover { filter: brightness(1.12); }
 .search-actions { display: flex; align-items: center; justify-content: space-between; margin-top: 6px; gap: 6px; }
 .search-results { flex: 1; overflow: auto; padding-bottom: 20px; }
 .search-group { border-bottom: 1px solid var(--border); }
@@ -346,6 +360,20 @@ button.primary:hover { filter: brightness(1.08); }
 .panel-actions { display: flex; gap: 1px; }
 .panel-pane { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .panel-pane.output { margin: 0; padding: 8px 11px; overflow: auto; white-space: pre-wrap; font: 12px/1.5 Consolas, monospace; color: var(--muted); }
+.run-input-row {
+  flex: none; display: flex; align-items: center; gap: 7px;
+  padding: 6px 8px; border-top: 1px solid var(--border); background: var(--bg-2);
+}
+.run-input-row label {
+  font-size: 10px; font-weight: 700; letter-spacing: .6px;
+  text-transform: uppercase; color: var(--faint);
+}
+.run-input-row input {
+  flex: 1; min-width: 0; padding: 6px 8px; border-radius: 5px;
+  border: 1px solid var(--border); background: var(--bg); color: var(--text);
+  font: 12px Consolas, monospace;
+}
+.run-input-row input:focus { outline: none; border-color: var(--accent); }
 .terminal-tabs { display: flex; gap: 2px; padding: 3px 6px 0; flex: none; }
 .terminal-tab {
   display: inline-flex; align-items: center; gap: 5px; background: transparent; border: 0;
@@ -397,6 +425,8 @@ button.primary:hover { filter: brightness(1.08); }
 .palette-item .p-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .palette-item .p-path { color: var(--faint); font-size: 10.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 55%; }
 .palette-item .p-key { color: var(--faint); font: 10px Consolas, monospace; }
+.palette-item .p-kind { color: var(--faint); font-size: 9.5px; text-transform: uppercase; letter-spacing: .5px; }
+.palette-item .p-line { color: var(--faint); font: 10px Consolas, monospace; }
 .palette-hint { padding: 6px 12px; border-top: 1px solid var(--border); color: var(--faint); font-size: 10.5px; }
 
 .modal-box {

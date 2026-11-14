@@ -107,8 +107,13 @@
             <button id="searchCase" class="toggle" title="Match case">Aa</button>
             <button id="searchWord" class="toggle" title="Whole word">W</button>
           </div>
+          <div id="searchReplaceRow" class="search-input-row hidden">
+            <input id="replaceInput" type="text" placeholder="Replace with…" autocomplete="off" spellcheck="false">
+            <button id="replaceAllBtn" class="replace-btn" title="Preview and replace all matches">Replace</button>
+          </div>
           <div class="search-actions">
             <span id="searchSummary" class="muted small">Type to search the workspace.</span>
+            <button id="searchReplaceToggle" class="mini-btn" title="Toggle replace"><svg class="icon"><use href="#i-edit"></use></svg></button>
             <button id="searchClear" class="mini-btn" title="Clear"><svg class="icon"><use href="#i-close"></use></svg></button>
           </div>
         </div>
@@ -205,6 +210,11 @@
           <div id="terminalError" class="terminal-error hidden"></div>
         </div>
         <pre id="outputPane" class="panel-pane output hidden"><span id="output">Ready.</span></pre>
+        <form id="runInputRow" class="run-input-row hidden">
+          <label for="runInput">Input</label>
+          <input id="runInput" type="text" placeholder="Type program input and press Enter…" autocomplete="off" spellcheck="false">
+          <button type="submit" class="replace-btn" title="Send input to the running program">Send</button>
+        </form>
       </section>
 
       <footer class="statusbar">
@@ -222,15 +232,15 @@
     </main>
   </div>
 
-  <div id="palette" class="overlay hidden" role="dialog" aria-modal="true" aria-label="Quick open">
+  <div id="command-palette-overlay" class="overlay hidden" role="dialog" aria-modal="true" aria-label="Quick open and command palette">
     <div class="palette-box">
       <div class="palette-input-row">
         <svg class="icon"><use href="#i-search"></use></svg>
-        <input id="paletteInput" type="text" placeholder="Search files by name…" autocomplete="off" spellcheck="false" aria-controls="paletteList" aria-autocomplete="list">
+        <input id="command-palette-input" type="text" placeholder="Search files by name…" autocomplete="off" spellcheck="false" aria-controls="command-palette-results" aria-autocomplete="list">
         <kbd>Esc</kbd>
       </div>
-      <div id="paletteList" class="palette-list" role="listbox"></div>
-      <div id="paletteHint" class="palette-hint"></div>
+      <div id="command-palette-results" class="palette-list" role="listbox"></div>
+      <div id="command-palette-hint" class="palette-hint"></div>
     </div>
   </div>
 

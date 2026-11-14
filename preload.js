@@ -26,6 +26,7 @@ contextBridge.exposeInMainWorld('api', {
     children: (dir) => invoke('workspace:children', dir),
     files: (payload) => invoke('workspace:files', payload),
     search: (payload) => invoke('workspace:search', payload),
+    replace: (payload) => invoke('workspace:replace', payload),
     watchStart: (dir) => invoke('workspace:watchStart', dir),
     watchStop: () => invoke('workspace:watchStop'),
     stat: (path) => invoke('workspace:stat', path),
@@ -35,7 +36,8 @@ contextBridge.exposeInMainWorld('api', {
 
   file: {
     read: (path) => invoke('file:read', path),
-    write: (path, content) => invoke('file:write', path, content),
+    write: (path, content, expectedMtime) => invoke('file:write', path, content, expectedMtime),
+    stat: (path) => invoke('fs:stat', path),
     newFile: (root) => invoke('file:new', root),
     openDialog: () => invoke('dialog:file'),
     rename: (path, name) => invoke('file:rename', path, name),
@@ -70,6 +72,7 @@ contextBridge.exposeInMainWorld('api', {
   run: {
     start: (payload) => invoke('run:start', payload),
     stop: () => invoke('run:stop'),
+    input: (text) => invoke('run:input', text),
     check: (exe) => invoke('run:check', exe)
   },
 
@@ -89,6 +92,11 @@ contextBridge.exposeInMainWorld('api', {
     read: (file) => invoke('recovery:read', file),
     save: (payload) => invoke('recovery:save', payload),
     clear: (file) => invoke('recovery:clear', file)
+  },
+
+  session: {
+    load: () => invoke('session:load'),
+    save: (session) => invoke('session:save', session)
   },
 
   on: {

@@ -1,6 +1,6 @@
 {
   "name": "peabox-ide",
-  "version": "0.16.0",
+  "version": "0.17.0",
   "private": true,
   "description": "A fast, local-first desktop code editor with a lazy explorer, async search, Git integration, runtimes, terminals and crash recovery.",
   "main": "main.js",
