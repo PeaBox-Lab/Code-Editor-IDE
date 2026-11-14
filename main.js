@@ -1016,6 +1016,42 @@ ipcMain.handle('run:check', async (_, exe) => {
   return { ok: res.code === 0, code: res.code, text: (res.stdout || res.stderr || '').trim(), timedOut: res.timedOut };
 });
 
+ipcMain.handle('problems:check', async (_, payload) => {
+  const file = assertAllowed(payload && payload.file);
+  const lang = String((payload && payload.lang) || PB.normalizeLanguage(file));
+  const cwd = assertWorkspaceDir(payload && payload.cwd);
+  const runtimes = (payload && payload.runtimes) || {};
+
+  let exe = '', args = [];
+  if (lang === 'javascript' || lang === 'typescript') {
+    exe = String(runtimes.node || 'node').trim();
+    args = ['--check', file];
+  } else if (lang === 'python') {
+    exe = String(runtimes.python || 'python').trim();
+    args = ['-m', 'py_compile', file];
+  } else if (lang === 'go') {
+    exe = String(runtimes.go || 'go').trim();
+    args = ['vet', file];
+  } else {
+    return { ok: true, file, lang, diagnostics: [], skipped: true };
+  }
+
+  if (/[\\/]/.test(exe) && !fs.existsSync(exe)) {
+    return { ok: false, file, lang, diagnostics: [], error: 'Runtime not found: ' + exe };
+  }
+
+  const env = { ...process.env, PYTHONIOENCODING: 'utf-8', PYTHONUTF8: '1', PYTHONUNBUFFERED: '1' };
+  const res = await runProcess(exe, args, { cwd, timeout: 15000, env });
+  if (res.timedOut) {
+    return { ok: false, file, lang, diagnostics: [], error: 'Check timed out after 15s.' };
+  }
+  if (res.code !== 0 && !res.stdout && !res.stderr) {
+    return { ok: false, file, lang, diagnostics: [], error: 'Check failed with code ' + res.code };
+  }
+  const diagnostics = PB.parseDiagnostics(res.stderr + '\n' + res.stdout);
+  return { ok: true, file, lang, diagnostics, code: res.code };
+});
+
 ipcMain.handle('runtime:detect', async (_, payload) => {
   const name = String(payload && payload.name || '').trim();
   const path = String(payload && payload.path || '').trim();

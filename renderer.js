@@ -41,7 +41,8 @@ const S = {
   persistTimer: null,
   closePrompt: false,
   recoveryOffered: false,
-  panel: 'terminalPane'
+  panel: 'terminalPane',
+  problems: []
 };
 
 const settings = () => S.state.settings;
@@ -266,7 +267,8 @@ function applyEditorOptions() {
     fontFamily: s.fontFamily,
     tabSize: s.tabSize,
     wordWrap: s.wordWrap ? 'on' : 'off',
-    minimap: { enabled: s.minimap }
+    minimap: { enabled: s.minimap },
+    stickyScroll: s.stickyScroll
   });
   $('spacesStatus').textContent = 'Spaces: ' + s.tabSize;
 }
@@ -381,7 +383,7 @@ function persistNow() {
 /* ---------------- views ---------------- */
 
 function showView(view) {
-  const map = { explorer: 'explorerView', search: 'searchView', git: 'gitView' };
+  const map = { explorer: 'explorerView', search: 'searchView', git: 'gitView', outline: 'outlineView' };
   Object.values(map).forEach((id) => setHidden($(id), true));
   setHidden($(map[view] || 'explorerView'), false);
   $$('.activity[data-view]').forEach((b) => b.classList.toggle('active', b.dataset.view === view));
@@ -1021,6 +1023,7 @@ function activateEntry(key) {
   syncWelcome();
   S.editor.focus();
   persistSoon();
+  refreshOutline();
   sessionSoon();
 }
 
@@ -1133,6 +1136,14 @@ async function saveFile(entry, options) {
 
   entry.saving = true;
   const version = entry.model.getVersionId();
+  if (settings().formatOnSave && currentEntry() === entry && !entry.virtual) {
+    const langs = String(settings().formatOnSaveLanguages || '')
+      .split(',').map((x) => x.trim().toLowerCase()).filter(Boolean);
+    const langId = String(entry.model.getLanguageId() || '').toLowerCase();
+    if (!langs.length || langs.includes(langId)) {
+      try { editorAction('editor.action.formatDocument'); } catch { /* formatter unavailable */ }
+    }
+  }
   try {
     const res = await api.file.write(entry.path, entry.model.getValue());
     entry.mtime = res.mtimeMs !== undefined ? res.mtimeMs : res.mtime;
@@ -1921,6 +1932,46 @@ function onRunOutput(payload) {
   appendOutput(payload.chunk);
 }
 
+/* ---------------- problems ---------------- */
+
+function renderProblems(diagnostics) {
+  const list = $('problemsList');
+  list.replaceChildren();
+  if (!diagnostics.length) {
+    list.appendChild(el('div', 'problems-empty', 'No problems found.'));
+    return;
+  }
+  for (const d of diagnostics) {
+    const row = el('button', 'problem-item ' + (d.severity === 'warning' ? 'warning' : 'error'));
+    row.appendChild(icon(d.severity === 'warning' ? 'warning' : 'warning'));
+    const body = el('div', 'problem-body');
+    body.appendChild(el('div', 'problem-title', d.message));
+    body.appendChild(el('div', 'problem-loc', PB.basename(d.file) + ':' + d.line + ':' + d.column));
+    row.appendChild(body);
+    row.onclick = () => { if (d.file) openFile(d.file, d.line, d.column); };
+    list.appendChild(row);
+  }
+}
+
+async function runProblemsCheck() {
+  const entry = currentEntry();
+  if (!entry || entry.virtual) { toast('Open a file to check.', 'info', 1800); return; }
+  const res = await api.problems.check({
+    file: entry.path, lang: PB.normalizeLanguage(entry.path),
+    cwd: S.root, runtimes: settings().runtimes
+  });
+  if (!res.ok) { toast('Problems check failed: ' + (res.error || 'unknown'), 'error', 6000); return; }
+  S.problems = res.diagnostics || [];
+  renderProblems(S.problems);
+  showPanel('problemsPane');
+}
+
+async function clearProblems() {
+  S.problems = [];
+  renderProblems([]);
+  showPanel('outputPane');
+}
+
 function onRunExit(payload) {
   if (S.runId === null) { S.runPendingExit = payload; return; }
   if (payload.id !== S.runId) return;
@@ -1961,6 +2012,7 @@ function showPanel(panelName) {
   $$('.panel-tab').forEach((b) => b.classList.toggle('active', b.dataset.panel === S.panel));
   setHidden($('terminalPane'), S.panel !== 'terminalPane');
   setHidden($('outputPane'), S.panel !== 'outputPane');
+  setHidden($('problemsPane'), S.panel !== 'problemsPane');
   updateRunInput();
   if (S.panel === 'terminalPane' && S.activeTerminal) setTimeout(() => fitTerminal(S.activeTerminal), 30);
 }
@@ -2162,6 +2214,8 @@ function commandList() {
     { id: 'view.output', label: 'View: Show Output', run: () => showPanel('outputPane') },
     { id: 'view.theme', label: 'View: Toggle Theme', run: () => toggleTheme() },
     { id: 'view.wordWrap', label: 'View: Toggle Word Wrap', run: () => toggleWordWrap() },
+    { id: 'view.stickyScroll', label: 'View: Toggle Sticky Scroll', key: 'Ctrl+Shift+S', run: () => toggleStickyScroll() },
+    { id: 'view.outline', label: 'View: Show Outline', key: 'Ctrl+Shift+U', run: () => showView('outline') },
     { id: 'view.symbols', label: 'View: Go to Symbol…', key: 'Ctrl+Shift+O', run: () => openPalette('symbols') },
     { id: 'view.zoomIn', label: 'View: Increase Editor Font Size', key: 'Ctrl+=', run: () => zoomEditor(1) },
     { id: 'view.zoomOut', label: 'View: Decrease Editor Font Size', key: 'Ctrl+-', run: () => zoomEditor(-1) },
@@ -2188,8 +2242,18 @@ function commandList() {
     { id: 'editor.find', label: 'Editor: Find', key: 'Ctrl+F', run: () => editorAction('actions.find') },
     { id: 'editor.replace', label: 'Editor: Replace', key: 'Ctrl+H', run: () => editorAction('editor.action.startFindReplaceAction') },
     { id: 'editor.gotoLine', label: 'Editor: Go to Line…', key: 'Ctrl+G', run: () => editorAction('editor.action.gotoLine') },
-    { id: 'editor.format', label: 'Editor: Format Document', key: 'Shift+Alt+F', run: () => editorAction('editor.action.formatDocument') }
+    { id: 'editor.format', label: 'Editor: Format Document', key: 'Shift+Alt+F', run: () => editorAction('editor.action.formatDocument') },
+    { id: 'editor.formatOnSave', label: 'Editor: Toggle Format On Save', run: () => toggleFormatOnSave() },
+    { id: 'problems.check', label: 'Problems: Check Current File', run: () => runProblemsCheck() },
+    { id: 'problems.show', label: 'View: Show Problems', run: () => runProblemsCheck() }
   ];
+}
+
+function toggleFormatOnSave() {
+  const s = settings();
+  s.formatOnSave = !s.formatOnSave;
+  persistSoon();
+  toast('Format on save ' + (s.formatOnSave ? 'enabled' : 'disabled'), 'info', 1600);
 }
 
 function toggleWordWrap() {
@@ -2198,6 +2262,14 @@ function toggleWordWrap() {
   applyEditorOptions();
   persistSoon();
   toast('Word wrap ' + (s.wordWrap ? 'enabled' : 'disabled'), 'info', 1600);
+}
+
+function toggleStickyScroll() {
+  const s = settings();
+  s.stickyScroll = !s.stickyScroll;
+  applyEditorOptions();
+  persistSoon();
+  toast('Sticky scroll ' + (s.stickyScroll ? 'enabled' : 'disabled'), 'info', 1600);
 }
 
 function applyTextTransform(id) {
@@ -2312,6 +2384,30 @@ function jumpToSymbol(symbol) {
   S.editor.focus();
   updatePositionStatus();
   sessionSoon();
+}
+
+function refreshOutline() {
+  const host = $('outlineTree');
+  host.replaceChildren();
+  const entry = currentEntry();
+  if (!entry || entry.virtual) {
+    host.appendChild(el('div', 'tree empty', 'Open a file to see symbols.'));
+    return;
+  }
+  const ext = PB.extname(entry.path);
+  const symbols = PB.extractDocumentSymbols(entry.model.getValue(), ext);
+  if (!symbols.length) {
+    host.appendChild(el('div', 'tree empty', 'No symbols found in this file.'));
+    return;
+  }
+  for (const sym of symbols) {
+    const row = el('div', 'outline-item');
+    row.appendChild(el('span', 'outline-kind ' + (sym.kind || ''), (sym.kind || 'sym').slice(0, 2).toUpperCase()));
+    row.appendChild(el('span', 'outline-name', sym.name));
+    row.title = sym.name + '  (line ' + sym.line + ')';
+    row.onclick = () => jumpToSymbol(sym);
+    host.appendChild(row);
+  }
 }
 
 function symbolPaletteItems(query) {
@@ -2529,6 +2625,8 @@ async function openSettings() {
   appearance.appendChild(settingsRow('Word wrap', 'Wrap long lines instead of scrolling.', wordWrap));
   const minimap = checkbox(s.minimap);
   appearance.appendChild(settingsRow('Minimap', 'Show the code overview on the right.', minimap));
+  const stickyScroll = checkbox(s.stickyScroll);
+  appearance.appendChild(settingsRow('Sticky scroll', 'Keep the cursor at the top while scrolling.', stickyScroll));
   body.appendChild(appearance);
 
   const editing = el('section', 'settings-section');
@@ -2538,6 +2636,11 @@ async function openSettings() {
   const autoSaveDelay = textInput(s.autoSaveDelay, 'number');
   autoSaveDelay.min = '250'; autoSaveDelay.max = '10000'; autoSaveDelay.step = '50';
   editing.appendChild(settingsRow('Auto save delay', 'Milliseconds of inactivity before saving.', autoSaveDelay));
+  const formatOnSave = checkbox(s.formatOnSave);
+  editing.appendChild(settingsRow('Format on save', 'Run the Monaco formatter before saving. Languages: ' + (s.formatOnSaveLanguages || '').replace(/,/g, ', '), formatOnSave));
+  const formatOnSaveLanguages = textInput(s.formatOnSaveLanguages, 'text');
+  formatOnSaveLanguages.placeholder = 'javascript,typescript,json,html,css,scss,less,markdown';
+  editing.appendChild(settingsRow('Format on save languages', 'Comma-separated Monaco language ids that may be formatted.', formatOnSaveLanguages));
   body.appendChild(editing);
 
   const terminalSection = el('section', 'settings-section');
@@ -2624,6 +2727,8 @@ async function openSettings() {
   s.minimap = minimap.checked;
   s.autoSave = autoSave.checked;
   s.autoSaveDelay = PB.clamp(autoSaveDelay.value, 250, 10000);
+  s.formatOnSave = formatOnSave.checked;
+  s.formatOnSaveLanguages = formatOnSaveLanguages.value.trim() || s.formatOnSaveLanguages;
   s.terminalFontSize = PB.clamp(termFont.value, 9, 24);
   s.terminalShell = shell.value.trim();
   s.excludes = excludes.value.trim() || PB.DEFAULT_EXCLUDES.join(', ');
@@ -2648,6 +2753,7 @@ function showShortcuts() {
     ['Quick open files', 'Ctrl+P'],
     ['Command palette', 'Ctrl+Shift+P'],
     ['Go to symbol', 'Ctrl+Shift+O'],
+    ['Sticky scroll', 'Ctrl+Shift+S'],
     ['Open file', 'Ctrl+Alt+O'],
     ['Open folder', 'Ctrl+O'],
     ['Save', 'Ctrl+S'],
@@ -2660,6 +2766,7 @@ function showShortcuts() {
     ['Search', 'Ctrl+Shift+F'],
     ['Replace in files', 'Ctrl+Shift+H'],
     ['Source control', 'Ctrl+Shift+G'],
+    ['Outline', 'Ctrl+Shift+U'],
     ['Settings', 'Ctrl+,'],
     ['Run current file', 'F5'],
     ['Stop', 'Shift+F5']
@@ -2847,6 +2954,8 @@ function onKeyDown(event) {
   if (mod && event.shiftKey && lower === 'h') { event.preventDefault(); openWorkspaceReplace(); return; }
   if (mod && event.shiftKey && lower === 'e') { event.preventDefault(); showView('explorer'); return; }
   if (mod && event.shiftKey && lower === 'g') { event.preventDefault(); showView('git'); return; }
+  if (mod && event.shiftKey && lower === 'u') { event.preventDefault(); showView('outline'); return; }
+  if (mod && event.shiftKey && lower === 's') { event.preventDefault(); toggleStickyScroll(); return; }
   if (mod && event.shiftKey && lower === 'o') { event.preventDefault(); openPalette('symbols'); return; }
   if (mod && event.altKey && lower === 'o') { event.preventDefault(); openFilesFlow(); return; }
   if (mod && !event.shiftKey && lower === 'o') { event.preventDefault(); openWorkspaceDialog(); return; }
@@ -2904,6 +3013,8 @@ function bindEvents() {
   });
 
   $('gitRefresh').onclick = () => refreshGit();
+  $('outlineBtn').onclick = () => showView('outline');
+  $('outlineRefresh').onclick = () => refreshOutline();
   $('gitNewBranch').onclick = () => createBranch();
   $('gitBranch').onchange = (event) => switchBranch(event.target.value);
   $('commitBtn').onclick = () => commitChanges();

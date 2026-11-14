@@ -83,6 +83,7 @@
       <button data-view="git" class="activity" title="Source Control (Ctrl+Shift+G)" aria-label="Source Control"><svg class="icon"><use href="#i-branch"></use></svg></button>
       <div class="activity-spacer"></div>
       <button id="settingsBtn" class="activity" title="Settings (Ctrl+,)" aria-label="Settings"><svg class="icon"><use href="#i-settings"></use></svg></button>
+      <button id="outlineBtn" class="activity" title="Outline (Ctrl+Shift+O)" aria-label="Outline"><svg class="icon"><use href="#i-list"></use></svg></button>
     </nav>
 
     <aside id="sidebar" class="sidebar">
@@ -97,6 +98,16 @@
           </div>
         </div>
         <div id="tree" class="tree empty">Open a folder to begin.</div>
+      </section>
+
+      <section id="outlineView" class="view hidden">
+        <div class="view-head">
+          <span>OUTLINE</span>
+          <div class="head-actions">
+            <button id="outlineRefresh" class="mini-btn" title="Refresh outline"><svg class="icon"><use href="#i-refresh"></use></svg></button>
+          </div>
+        </div>
+        <div id="outlineTree" class="tree empty">Open a file to see symbols.</div>
       </section>
 
       <section id="searchView" class="view hidden">
@@ -196,6 +207,7 @@
           <div class="panel-tabs" id="panelTabs">
             <button class="panel-tab active" data-panel="terminalPane"><svg class="icon"><use href="#i-terminal"></use></svg> TERMINAL</button>
             <button class="panel-tab" data-panel="outputPane"><svg class="icon"><use href="#i-output"></use></svg> OUTPUT</button>
+            <button class="panel-tab" data-panel="problemsPane"><svg class="icon"><use href="#i-warning"></use></svg> PROBLEMS</button>
           </div>
           <div class="panel-actions">
             <button id="newTerminal" class="mini-btn" title="New terminal"><svg class="icon"><use href="#i-plus"></use></svg></button>
@@ -215,6 +227,9 @@
           <input id="runInput" type="text" placeholder="Type program input and press Enter…" autocomplete="off" spellcheck="false">
           <button type="submit" class="replace-btn" title="Send input to the running program">Send</button>
         </form>
+        <div id="problemsPane" class="panel-pane hidden">
+          <div id="problemsList" class="problems-list"></div>
+        </div>
       </section>
 
       <footer class="statusbar">

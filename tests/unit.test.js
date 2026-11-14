@@ -343,6 +343,30 @@ test('applyCarriageReturns overwrites the current line for progress bars', () =>
   assert.equal(PB.applyCarriageReturns('done', '\nnext'), 'done\nnext');
 });
 
+test('parseDiagnostics extracts compiler diagnostics from text output', () => {
+  const nodeErr = 'C:\\Users\\Rajesh\\Documents\\My Apps\\GitHub\\Code-Editor-IDE\\tests\\fixture\\run-input.js:1:0: Name?\nSyntaxError: Unexpected token "`"';
+  const pyErr = 'File "C:\\path\\file.py", line 5:\n    x =\n    ^\n  SyntaxError: invalid syntax\nFile "C:\\path\\file2.py", line 3:\n    import os\n  ModuleNotFoundError: No module named \"os"\n';
+  const gccErr = 'src/main.go:10:2: undefined: foo\n  cmdline: ./main.go:10:2: undefined: foo\n';
+
+  var r1 = PB.parseDiagnostics(nodeErr);
+  assert.ok(r1.some(function (d) { return d.message.indexOf('SyntaxError') !== -1; }));
+  assert.ok(r1.some(function (d) { return d.file.indexOf('run-input.js') !== -1; }));
+  assert.ok(r1.every(function (d) { return d.severity === 'error'; }));
+
+  var r2 = PB.parseDiagnostics(pyErr);
+  assert.equal(r2.length, 2);
+  assert.equal(r2[0].file, 'C:\\path\\file.py');
+  assert.equal(r2[0].line, 5);
+  assert.ok(r2[0].message.indexOf('SyntaxError') !== -1);
+  assert.equal(r2[1].file, 'C:\\path\\file2.py');
+  assert.equal(r2[1].line, 3);
+
+  var r3 = PB.parseDiagnostics(gccErr);
+  assert.ok(r3.length >= 1);
+  assert.ok(r3.some(function (d) { return d.file.indexOf('main.go') !== -1; }));
+  assert.equal(r3[0].column, 2);
+});
+
 test('replaceInText supports case and whole-word options', () => {
   assert.deepEqual(
     PB.replaceInText('cat scatter Cat', 'cat', 'dog', { wholeWord: true }),

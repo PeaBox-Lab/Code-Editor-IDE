@@ -75,6 +75,9 @@ contextBridge.exposeInMainWorld('api', {
     input: (text) => invoke('run:input', text),
     check: (exe) => invoke('run:check', exe)
   },
+  problems: {
+    check: (payload) => invoke('problems:check', payload)
+  },
 
   runtime: {
     detect: (payload) => invoke('runtime:detect', payload)

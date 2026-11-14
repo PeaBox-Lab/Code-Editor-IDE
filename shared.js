@@ -381,6 +381,91 @@
   }
 
   /**
+   * Parses compiler/linter diagnostics from text output.
+   * Handles gcc-style `path:line:col: message`, node-style `path:line` followed by
+   * a caret block and `Error: message`, and python `File "path", line N` blocks.
+   * @param {string} text - Raw stderr/stdout text.
+   * @returns {Array<{file:string,line:number,column:number,severity:string,message:string}>}
+   */
+  function parseDiagnostics(text) {
+    var lines = str(text).split(/\r?\n/);
+    var out = [];
+    var pending = null;
+
+    function push(file, line, column, message) {
+      file = str(file).trim();
+      if (!file || !/[\\/.]/.test(file)) return;
+      out.push({
+        file: file, line: clamp(line, 1, 1000000), column: clamp(column, 1, 100000),
+        severity: /warning/i.test(message) ? 'warning' : 'error',
+        message: str(message).trim().slice(0, 600)
+      });
+    }
+
+    for (var i = 0; i < lines.length; i++) {
+      var line = lines[i];
+      if (!line.trim()) continue;
+
+      // python: File "C:\path\file.py", line 5
+      var py = line.match(/^File\s+"(.+)",\s+line\s+(\d+)/);
+      if (py) { pending = { file: py[1], line: parseInt(py[2], 10) }; continue; }
+      if (pending) {
+        if (/^[~^ ]+$/.test(line)) continue;
+        var pym = line.match(/^(\w*Error\S*|SyntaxError|IndentationError|TabError|.*?Error:\s.*)$/);
+        if (pym) { push(pending.file, pending.line, 1, pym[1]); pending = null; }
+        continue;
+      }
+
+      // gcc: path:line:col: message  (absolute paths may contain drive colons)
+      var gcc = line.match(/^(.+?):(\d+):(\d+):\s*(.*)$/);
+      if (gcc) { push(gcc[1], gcc[2], gcc[3], gcc[4]); continue; }
+
+      // gcc without column: path:line: message
+      var gcc2 = line.match(/^(.+?):(\d+):\s*(.*)$/);
+      if (gcc2) { push(gcc2[1], gcc2[2], 1, gcc2[3]); continue; }
+
+      // node: path:line followed by a caret line and Error: message
+      var node = line.match(/^(.+?):(\d+)\s*$/);
+      if (node) {
+        var j = i + 1;
+        while (j < lines.length && /^[\^~\s]+$/.test(lines[j])) j++;
+        var msg = '';
+        if (j < lines.length) {
+          var errLine = lines[j].match(/^([\w$.]+Error(?:\s+.*)?)$/);
+          msg = errLine ? errLine[1] : lines[j];
+        }
+        push(node[1], node[2], 1, msg || 'Syntax error');
+        if (j < lines.length) i = j;
+        continue;
+      }
+
+      // fallback: bare Error: line (attach to nearest known file)
+      var bare = line.match(/^([\w$.]+Error):\s*(.*)$/);
+      if (bare && out.length) {
+        var last = out[out.length - 1];
+        if (last && last.message.indexOf(bare[1]) !== 0) last.message += '; ' + line.trim();
+      }
+    }
+
+    // Deduplicate and sort by file/line/column.
+    var seen = {};
+    var clean = [];
+    for (var k = 0; k < out.length; k++) {
+      var d = out[k];
+      var key = d.file + ':' + d.line + ':' + d.column + ':' + d.message;
+      if (seen[key]) continue;
+      seen[key] = 1;
+      clean.push(d);
+    }
+    clean.sort(function (a, b) {
+      var af = normalizePath(a.file).toLowerCase(), bf = normalizePath(b.file).toLowerCase();
+      if (af !== bf) return af < bf ? -1 : 1;
+      return (a.line - b.line) || (a.column - b.column);
+    });
+    return clean;
+  }
+
+  /**
    * Normalizes line endings in file content.
    * @param {string} content - File content to normalize.
    * @param {string} [to='lf'] - Target line ending ('lf', 'crlf', 'native'). Defaults to 'lf'.
@@ -706,6 +791,7 @@
     return {
       theme: 'dark', fontSize: 14, fontFamily: 'Consolas, "Cascadia Code", monospace',
       tabSize: 2, wordWrap: false, minimap: true, autoSave: false, autoSaveDelay: 800,
+      formatOnSave: false, formatOnSaveLanguages: 'javascript,typescript,json,html,css,scss,less,markdown', stickyScroll: false,
       terminalFontSize: 13, terminalShell: '',
       runtimes: { python: 'python', node: 'node', go: 'go', powershell: 'powershell.exe' },
       excludes: DEFAULT_EXCLUDES.join(', '),
@@ -749,6 +835,9 @@
     s.minimap = rs.minimap !== false;
     s.autoSave = !!rs.autoSave;
     s.autoSaveDelay = clamp(rs.autoSaveDelay, 250, 10000);
+    s.formatOnSave = !!rs.formatOnSave;
+    s.stickyScroll = !!rs.stickyScroll;
+    if (typeof rs.formatOnSaveLanguages === 'string') s.formatOnSaveLanguages = rs.formatOnSaveLanguages.slice(0, 500);
     s.terminalFontSize = clamp(rs.terminalFontSize, 9, 24);
     if (typeof rs.terminalShell === 'string') s.terminalShell = rs.terminalShell.slice(0, 1000);
     if (rs.runtimes && typeof rs.runtimes === 'object') {
@@ -796,6 +885,7 @@
     sanitizeState: sanitizeState,
     detectFileEncoding: detectFileEncoding,
     normalizeLineEndings: normalizeLineEndings,
+    parseDiagnostics: parseDiagnostics,
     extractDocumentSymbols: extractDocumentSymbols,
     formatJsonText: formatJsonText,
     sortLines: sortLines,
