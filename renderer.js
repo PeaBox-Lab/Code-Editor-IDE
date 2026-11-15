@@ -2266,7 +2266,15 @@ async function openAiSettings() {
             const updated = await api.ai.keyStatus();
             if (updated && typeof updated === 'object') S.ai.keyStatus = updated;
           } catch { /* ignore */ }
-          toast('Key saved for ' + prov.label, 'success', 1800);
+          // Saving a key should make that provider active and enable AI, otherwise
+          // requests keep going to the previous (keyless) provider and fail.
+          s.ai.provider = prov.id;
+          s.ai.enabled = true;
+          S.ai.enabled = true;
+          try { providerSelect.value = prov.id; } catch { /* ignore */ }
+          try { aiEnabled.checked = true; } catch { /* ignore */ }
+          persistSoon();
+          toast('Key saved for ' + prov.label + ' — provider set to ' + prov.label, 'success', 2200);
         } else {
           toast(res.error || 'Failed to save key.', 'error');
         }
@@ -2281,6 +2289,7 @@ async function openAiSettings() {
           status.textContent = 'Not set';
           status.className = 'ai-key-status empty';
           input.value = '';
+          // Refresh cached key status so the rest of the app sees the key immediately.
           try {
             const updated = await api.ai.keyStatus();
             if (updated && typeof updated === 'object') S.ai.keyStatus = updated;
@@ -3001,7 +3010,7 @@ function commandList() {
     { id: 'ai.settings', label: 'AI: Open AI Settings', run: () => openAiSettings() },
     { id: 'ai.chat', label: 'AI: Chat', run: () => openAiChat() },
     { id: 'ai.complete', label: 'AI: Trigger Inline Completion', run: async () => { await triggerAiCompletion(); } },
-    { id: 'ai.codegen', label: 'AI: Codegen File', run: async () => { await openAiFileCreator(); } },
+    { id: 'ai.codegen', label: 'AI: Create File', run: async () => { await openAiFileCreator(); } },
     { id: 'ai.scaffold', label: 'AI: Scaffold Project', run: async () => { await openAiProjectScaffold(); } },
     { id: 'ai.edit', label: 'AI: Edit Current File', run: async () => { await applyAiToCurrentFile(); } }
   ];
