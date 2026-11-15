@@ -292,6 +292,7 @@ button.primary:hover { filter: brightness(1.08); }
   cursor: pointer; white-space: nowrap; color: var(--muted); position: relative; user-select: none;
 }
 .tab:hover { background: var(--bg-2); color: var(--text); }
+.tab.drop-target { border-left: 2px solid var(--accent); background: var(--accent-soft); }
 .tab.active { background: var(--bg); color: var(--text-strong); }
 .tab.active::after { content: ""; position: absolute; left: 0; right: 0; top: 0; height: 2px; background: var(--accent); }
 .tab-name { overflow: hidden; text-overflow: ellipsis; flex: 1; }

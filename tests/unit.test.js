@@ -404,3 +404,13 @@ test('defaultSession and sanitizeSession enforce the persisted schema', () => {
   assert.deepEqual(PB.sanitizeSession(null), PB.defaultSession());
   assert.deepEqual(PB.sanitizeSession('bad'), PB.defaultSession());
 });
+
+test('reorderKeys moves items without mutating the input', () => {
+  assert.deepEqual(PB.reorderKeys(['a', 'b', 'c'], 'c', 'a'), ['c', 'a', 'b']);
+  assert.deepEqual(PB.reorderKeys(['a', 'b', 'c'], 'a', 'c'), ['b', 'c', 'a']);
+  const keys = ['a', 'b', 'c'];
+  PB.reorderKeys(keys, 'c', 'a');
+  assert.deepEqual(keys, ['a', 'b', 'c']);
+  assert.deepEqual(PB.reorderKeys(['a', 'b'], 'z', 'a'), ['a', 'b']);
+  assert.deepEqual(PB.reorderKeys([], 'a', 'b'), []);
+});

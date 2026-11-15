@@ -769,6 +769,26 @@
     return (n / (1024 * 1024)).toFixed(1) + ' MB';
   }
 
+  /**
+   * Moves one item within an ordered list of keys to a new position.
+   * Pure helper used by tab drag-and-drop reordering.
+   * @param {Array<string>} keys - Current order of keys.
+   * @param {string} fromKey - Key being moved.
+   * @param {string} toKey - Key to move before.
+   * @returns {Array<string>} New array; returns input copy when move is invalid.
+   */
+  function reorderKeys(keys, fromKey, toKey) {
+    if (!Array.isArray(keys)) return [];
+    var out = keys.slice();
+    if (fromKey === toKey) return out;
+    var from = out.indexOf(fromKey);
+    var to = out.indexOf(toKey);
+    if (from < 0 || to < 0) return out;
+    out.splice(from, 1);
+    out.splice(to, 0, fromKey);
+    return out;
+  }
+
   function formatDuration(ms) {
     ms = Number(ms) || 0;
     if (ms < 1000) return ms + ' ms';
@@ -895,6 +915,7 @@
     transformText: transformText,
     replaceInText: replaceInText,
     defaultSession: defaultSession,
-    sanitizeSession: sanitizeSession
+    sanitizeSession: sanitizeSession,
+    reorderKeys: reorderKeys
   };
 });

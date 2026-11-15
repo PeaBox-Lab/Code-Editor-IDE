@@ -44,7 +44,8 @@ const S = {
   panel: 'terminalPane',
   problems: [],
   editor2: null,
-  current2: null
+  current2: null,
+  dragKey: null
 };
 
 const settings = () => S.state.settings;
@@ -939,6 +940,16 @@ async function deleteNode(node) {
 
 /* ---------------- tabs / editor entries ---------------- */
 
+function reorderTabs(fromKey, toKey) {
+  const keys = PB.reorderKeys(Array.from(S.models.keys()), fromKey, toKey);
+  const next = new Map();
+  for (const key of keys) next.set(key, S.models.get(key));
+  S.models = next;
+  renderTabs();
+  persistSoon();
+  sessionSoon();
+}
+
 function renderTabs() {
   const host = $('tabs');
   host.replaceChildren();
@@ -955,6 +966,21 @@ function renderTabs() {
     close.setAttribute('aria-label', 'Close ' + (entry.virtual ? entry.label : nameOf(entry.path)));
     close.onclick = (e) => { e.stopPropagation(); closeEntry(entry); };
     tab.appendChild(close);
+    tab.draggable = true;
+    tab.dataset.key = entry.key;
+    tab.ondragstart = (e) => { S.dragKey = entry.key; e.dataTransfer.effectAllowed = 'move'; };
+    tab.ondragover = (e) => { e.preventDefault(); tab.classList.add('drop-target'); };
+    tab.ondragleave = () => tab.classList.remove('drop-target');
+    tab.ondrop = (e) => {
+      e.preventDefault();
+      tab.classList.remove('drop-target');
+      if (S.dragKey && S.dragKey !== entry.key) reorderTabs(S.dragKey, entry.key);
+      S.dragKey = null;
+    };
+    tab.ondragend = () => {
+      S.dragKey = null;
+      $$('.tab').forEach(t => t.classList.remove('drop-target'));
+    };
     tab.onclick = () => activateEntry(entry.key);
     tab.onauxclick = (e) => { if (e.button === 1) { e.preventDefault(); closeEntry(entry); } };
     tab.oncontextmenu = (e) => {
