@@ -104,6 +104,14 @@ contextBridge.exposeInMainWorld('api', {
     diagnostics: (payload) => send('lsp:diagnostics', payload)
   },
 
+  ai: {
+    providers: () => invoke('ai:providers'),
+    keyStatus: () => invoke('ai:keyStatus'),
+    setKey: (payload) => invoke('ai:setKey', payload),
+    complete: (payload) => invoke('ai:complete', payload),
+    chat: (payload) => invoke('ai:chat', payload)
+  },
+
   recovery: {
     list: () => invoke('recovery:list'),
     read: (file) => invoke('recovery:read', file),

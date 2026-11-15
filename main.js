@@ -1,6 +1,6 @@
 'use strict';
 const {
-  app, BrowserWindow, ipcMain, dialog, Menu, shell, clipboard, screen
+  app, BrowserWindow, ipcMain, dialog, Menu, shell, clipboard, screen, safeStorage
 } = require('electron');
 const fs = require('fs');
 const fsp = fs.promises;
@@ -1282,6 +1282,131 @@ ipcMain.handle('lsp:list', async () => {
 
 ipcMain.on('lsp:diagnostics', (_, payload) => {
   send('lsp:diagnostics', payload);
+});
+
+/* ---------------- AI: provider keys + completions + chat ---------------- */
+
+const aiKeysFile = () => path.join(userDir(), 'ai-keys.json');
+
+function readAiKeyStore() {
+  try {
+    const raw = JSON.parse(fs.readFileSync(aiKeysFile(), 'utf8'));
+    return (raw && typeof raw === 'object' && !Array.isArray(raw)) ? raw : {};
+  } catch { return {}; }
+}
+
+function writeAiKeyStore(store) {
+  fs.mkdirSync(path.dirname(aiKeysFile()), { recursive: true });
+  writeFileAtomic.sync(aiKeysFile(), JSON.stringify(store), { encoding: 'utf8', fsync: true });
+}
+
+function encryptSecret(plain) {
+  try {
+    if (safeStorage && safeStorage.isEncryptionAvailable()) {
+      return { enc: safeStorage.encryptString(String(plain)).toString('base64') };
+    }
+  } catch { /* fall through to obfuscation */ }
+  return { b64: Buffer.from(String(plain), 'utf8').toString('base64') };
+}
+
+function decryptSecret(entry) {
+  if (!entry || typeof entry !== 'object') return '';
+  try {
+    if (entry.enc) return safeStorage.decryptString(Buffer.from(entry.enc, 'base64'));
+    if (entry.b64) return Buffer.from(entry.b64, 'base64').toString('utf8');
+  } catch { return ''; }
+  return '';
+}
+
+async function aiRequest(opts) {
+  const providerId = String((opts && opts.providerId) || '');
+  const provider = PB.aiProviderById(providerId);
+  if (!provider) throw new Error('Unknown AI provider: ' + providerId);
+  const store = readAiKeyStore();
+  const key = decryptSecret(store[providerId]);
+  if (provider.needsKey && !key) throw new Error('No API key set for ' + provider.label + '.');
+  const req = PB.buildChatRequest({
+    provider: provider,
+    key: key,
+    model: (opts && opts.model) || provider.model,
+    endpoint: (opts && opts.endpoint) || provider.endpoint,
+    messages: (opts && opts.messages) || [],
+    maxTokens: (opts && opts.maxTokens) || 1024,
+    temperature: typeof (opts && opts.temperature) === 'number' ? opts.temperature : 0.2
+  });
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 30000);
+  let res;
+  try {
+    res = await fetch(req.url, {
+      method: 'POST',
+      headers: req.headers,
+      body: JSON.stringify(req.body),
+      signal: controller.signal
+    });
+  } catch (err) {
+    clearTimeout(timer);
+    const aborted = err && (err.name === 'AbortError' || /abort/i.test(String(err.message || '')));
+    throw new Error(aborted ? 'AI request timed out.' : ('AI request failed: ' + (err && err.message || err)));
+  }
+  clearTimeout(timer);
+  const text = await res.text();
+  let json = null;
+  try { json = JSON.parse(text); } catch { /* ignore parse errors */ }
+  if (!res.ok) {
+    const detail = (json && json.error && (json.error.message || json.error)) || text || ('HTTP ' + res.status);
+    throw new Error(String(detail).slice(0, 500));
+  }
+  return { ok: true, text: PB.parseChatResponse(json, req.kind), raw: json };
+}
+
+ipcMain.handle('ai:providers', () => ({ providers: PB.aiProviders() }));
+
+ipcMain.handle('ai:keyStatus', () => {
+  const store = readAiKeyStore();
+  const out = {};
+  Object.keys(store).forEach((id) => {
+    const v = decryptSecret(store[id]);
+    if (v) out[id] = PB.maskSecret(v);
+  });
+  return out;
+});
+
+ipcMain.handle('ai:setKey', (_, payload) => {
+  const id = String((payload && payload.provider) || '');
+  const key = String((payload && payload.key) || '');
+  if (!id) throw new Error('Provider is required.');
+  const store = readAiKeyStore();
+  if (key) store[id] = encryptSecret(key);
+  else delete store[id];
+  writeAiKeyStore(store);
+  return { ok: true, provider: id, masked: key ? PB.maskSecret(key) : '' };
+});
+
+ipcMain.handle('ai:complete', async (_, payload) => {
+  const messages = PB.aiCompletionMessages(payload && payload.language, payload && payload.prefix, payload && payload.suffix);
+  const res = await aiRequest({
+    providerId: payload && payload.provider,
+    model: payload && payload.model,
+    endpoint: payload && payload.endpoint,
+    messages: messages,
+    maxTokens: 256,
+    temperature: 0.1
+  });
+  return { ok: true, completion: PB.extractCodeFence(res.text) };
+});
+
+ipcMain.handle('ai:chat', async (_, payload) => {
+  const messages = PB.aiChatMessages(payload && payload.question, payload && payload.context);
+  const res = await aiRequest({
+    providerId: payload && payload.provider,
+    model: payload && payload.model,
+    endpoint: payload && payload.endpoint,
+    messages: messages,
+    maxTokens: 1024,
+    temperature: 0.3
+  });
+  return { ok: true, text: res.text };
 });
 
 /* ---------------- IPC: recovery ---------------- */

@@ -949,7 +949,12 @@
       terminalFontSize: 13, terminalShell: '',
       runtimes: { python: 'python', node: 'node', go: 'go', powershell: 'powershell.exe' },
       excludes: DEFAULT_EXCLUDES.join(', '),
-      sidebarWidth: 280, panelHeight: 220, showSidebar: true
+      sidebarWidth: 280, panelHeight: 220, showSidebar: true,
+      ai: {
+        enabled: false,
+        provider: 'openai',
+        keys: {}
+      }
     };
   }
 
@@ -1003,6 +1008,18 @@
     s.sidebarWidth = clamp(rs.sidebarWidth, 180, 520);
     s.panelHeight = clamp(rs.panelHeight, 120, 700);
     s.showSidebar = rs.showSidebar !== false;
+
+    // AI settings (provider keys stored in session state, not plaintext in source).
+    if (rs.ai && typeof rs.ai === 'object' && !Array.isArray(rs.ai)) {
+      s.ai.enabled = !!rs.ai.enabled;
+      if (typeof rs.ai.provider === 'string' && rs.ai.provider.trim()) s.ai.provider = rs.ai.provider.trim().slice(0, 64);
+      if (rs.ai.keys && typeof rs.ai.keys === 'object' && !Array.isArray(rs.ai.keys)) {
+        Object.keys(rs.ai.keys).forEach(function (k) {
+          var key = String(rs.ai.keys[k]);
+          if (key.trim()) s.ai.keys[k] = key.slice(0, 1024);
+        });
+      }
+    }
     return out;
   }
 
@@ -1154,6 +1171,136 @@
     };
   }
 
+  /* ---------------- AI provider helpers ---------------- */
+
+  var AI_PROVIDERS = [
+    { id: 'openai', label: 'OpenAI', kind: 'openai', endpoint: 'https://api.openai.com/v1', model: 'gpt-4o-mini', needsKey: true },
+    { id: 'anthropic', label: 'Anthropic Claude', kind: 'anthropic', endpoint: 'https://api.anthropic.com/v1', model: 'claude-3-5-sonnet-latest', needsKey: true },
+    { id: 'gemini', label: 'Google Gemini', kind: 'openai', endpoint: 'https://generativelanguage.googleapis.com/v1beta/openai', model: 'gemini-1.5-flash', needsKey: true },
+    { id: 'openrouter', label: 'OpenRouter', kind: 'openai', endpoint: 'https://openrouter.ai/api/v1', model: 'openai/gpt-4o-mini', needsKey: true },
+    { id: 'opencode', label: 'OpenCode Zen', kind: 'openai', endpoint: 'https://opencode.ai/zen/v1', model: 'gpt-5-nano', needsKey: true },
+    { id: 'huggingface', label: 'HuggingFace', kind: 'openai', endpoint: 'https://router.huggingface.co/v1', model: 'meta-llama/Llama-3.3-70B-Instruct', needsKey: true },
+    { id: 'ollama', label: 'Ollama (local)', kind: 'ollama', endpoint: 'http://localhost:11434/v1', model: 'qwen2.5-coder:7b', needsKey: false },
+    { id: 'azure', label: 'Azure Foundry', kind: 'openai', endpoint: '', model: 'gpt-4o-mini', needsKey: true }
+  ];
+
+  function aiProviders() {
+    return AI_PROVIDERS.map(function (p) { return Object.assign({}, p); });
+  }
+
+  function aiProviderById(id) {
+    for (var i = 0; i < AI_PROVIDERS.length; i++) {
+      if (AI_PROVIDERS[i].id === id) return Object.assign({}, AI_PROVIDERS[i]);
+    }
+    return null;
+  }
+
+  /** Append a path to an endpoint, keeping any existing ?query string. */
+  function aiJoinUrl(endpoint, path) {
+    var e = str(endpoint);
+    var q = '';
+    var qi = e.indexOf('?');
+    if (qi >= 0) { q = e.slice(qi); e = e.slice(0, qi); }
+    e = e.replace(/\/+$/, '') + path;
+    return e + q;
+  }
+
+  /** Build inline-completion messages for the chat API. */
+  function aiCompletionMessages(language, prefix, suffix) {
+    var sys = 'You are PeaBox AI, an inline code completion engine. Continue the code from the cursor. ' +
+      'Return ONLY the code to insert at the cursor, with no explanation, no markdown fences, ' +
+      'and no repetition of the existing text. If no useful completion exists, return an empty string.';
+    var user = 'Language: ' + (language || 'plaintext') + '\n\n' +
+      'Code before cursor:\n' + str(prefix) + '\n<<<CURSOR>>>\nCode after cursor:\n' + str(suffix);
+    return [{ role: 'system', content: sys }, { role: 'user', content: user }];
+  }
+
+  /** Build chat messages for the freeform assistant. */
+  function aiChatMessages(question, context) {
+    var sys = 'You are PeaBox AI, a coding assistant embedded in a desktop code editor. ' +
+      'Answer concisely. When you provide code, use fenced code blocks with the language identified.';
+    var user = (context ? 'Context:\n' + str(context) + '\n\n' : '') + str(question);
+    return [{ role: 'system', content: sys }, { role: 'user', content: user }];
+  }
+
+  /** Build an HTTP request descriptor for a chat completion.
+   *  @returns {{url:string, headers:Object, body:Object, kind:string}} */
+  function buildChatRequest(opts) {
+    var o = opts || {};
+    var provider = typeof o.provider === 'string' ? aiProviderById(o.provider) : o.provider;
+    if (!provider) throw new Error('Unknown AI provider.');
+    var key = str(o.key || '');
+    var model = str(o.model || provider.model);
+    var endpoint = str(o.endpoint || provider.endpoint || '');
+    var messages = Array.isArray(o.messages) ? o.messages : [];
+    var maxTokens = clamp(o.maxTokens || 1024, 1, 32000);
+    var temperature = typeof o.temperature === 'number' ? o.temperature : 0.2;
+    if (!endpoint) throw new Error('Endpoint is required for ' + provider.label + '.');
+    endpoint = str(endpoint).replace(/\/+$/, '');
+    var headers = { 'Content-Type': 'application/json' };
+    var body;
+
+    if (provider.kind === 'anthropic') {
+      var system = '';
+      var rest = [];
+      for (var i = 0; i < messages.length; i++) {
+        var m = messages[i];
+        if (m && m.role === 'system') system += (system ? '\n\n' : '') + str(m.content);
+        else rest.push({ role: m && m.role === 'assistant' ? 'assistant' : 'user', content: str(m && m.content) });
+      }
+      if (key) headers['x-api-key'] = key;
+      headers['anthropic-version'] = '2023-06-01';
+      body = { model: model, max_tokens: maxTokens, messages: rest };
+      if (system) body.system = system;
+      body.temperature = temperature;
+      return { url: aiJoinUrl(endpoint, '/messages'), headers: headers, body: body, kind: 'anthropic' };
+    }
+
+    // OpenAI-compatible providers (openai, gemini, openrouter, opencode, huggingface, ollama, azure).
+    if (key) {
+      if (provider.id === 'azure') headers['api-key'] = key;
+      else headers['Authorization'] = 'Bearer ' + key;
+    }
+    body = { model: model, messages: messages, max_tokens: maxTokens, temperature: temperature };
+    return { url: aiJoinUrl(endpoint, '/chat/completions'), headers: headers, body: body, kind: 'openai' };
+  }
+
+  /** Extract assistant text from a provider chat response JSON. */
+  function parseChatResponse(json, kind) {
+    if (!json || typeof json !== 'object') return '';
+    if (kind === 'anthropic' || (Array.isArray(json.content) && json.type === 'message')) {
+      var parts = Array.isArray(json.content) ? json.content : [];
+      return parts.map(function (p) { return str(p && p.text); }).join('');
+    }
+    var choice = json.choices && json.choices[0];
+    if (choice) {
+      if (choice.message && typeof choice.message.content === 'string') return choice.message.content;
+      if (typeof choice.text === 'string') return choice.text;
+    }
+    if (typeof json.response === 'string') return json.response; // Ollama native
+    return '';
+  }
+
+  /** Remove surrounding markdown code fences and trim, for inline insertion. */
+  function extractCodeFence(text) {
+    if (typeof text !== 'string') return '';
+    var t = text.trim();
+    var closed = t.match(/^```[a-zA-Z0-9_+.#-]*\r?\n([\s\S]*?)\r?\n?```\s*$/);
+    if (closed) return closed[1];
+    if (/^```/.test(t)) {
+      t = t.replace(/^```[a-zA-Z0-9_+.#-]*\r?\n?/, '').replace(/```\s*$/, '');
+    }
+    return t;
+  }
+
+  /** Mask a secret for display. */
+  function maskSecret(value) {
+    var v = str(value);
+    if (!v) return '';
+    if (v.length <= 8) return '••••';
+    return v.slice(0, 4) + '…' + v.slice(-4);
+  }
+
   return {
     DEFAULT_EXCLUDES: DEFAULT_EXCLUDES,
     LANGUAGES: LANGUAGES,
@@ -1213,6 +1360,13 @@
     createLspClient: createLspClient,
     defaultSession: defaultSession,
     sanitizeSession: sanitizeSession,
-    reorderKeys: reorderKeys
+    reorderKeys: reorderKeys,
+    // AI provider helpers
+    aiProviders: aiProviders,
+    aiProviderById: aiProviderById,
+    buildChatRequest: buildChatRequest,
+    parseChatResponse: parseChatResponse,
+    extractCodeFence: extractCodeFence,
+    maskSecret: maskSecret
   };
 });

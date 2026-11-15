@@ -613,7 +613,7 @@ test('createLspClient correlates requests and parses streamed responses', () => 
 
 test('createLspClient handles error responses in notification dispatch', () => {
   const client = PB.createLspClient({ write: () => {} });
-  client.request('textDocument/definition', {});
+  client.request('textDocument/definition', {}).catch(() => {});
   const errorReply = PB.encodeLSPMessage({ jsonrpc: '2.0', id: 1, error: { code: -32601, message: 'Method not found' } });
   client.onData(errorReply);
   assert.strictEqual(client.pendingCount(), 0);
@@ -622,8 +622,8 @@ test('createLspClient handles error responses in notification dispatch', () => {
 test('createLspClient rejects requests on error responses', async () => {
   const client = PB.createLspClient({ write: () => {} });
   const p = client.request('textDocument/definition', {});
-  const err = await p.then(() => null, (e) => e);
   client.onData(PB.encodeLSPMessage({ jsonrpc: '2.0', id: 1, error: { code: -32601, message: 'Method not found' } }));
+  const err = await p.then(() => null, (e) => e);
   assert.ok(err instanceof Error);
   assert.strictEqual(err.message, 'Method not found');
 });

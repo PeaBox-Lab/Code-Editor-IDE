@@ -45,7 +45,14 @@ const S = {
   problems: [],
   editor2: null,
   current2: null,
-  dragKey: null
+  dragKey: null,
+  ai: {
+    enabled: false,
+    providers: [],
+    keyStatus: {},
+    model: '',
+    endpoint: ''
+  }
 };
 
 const settings = () => S.state.settings;
@@ -2052,6 +2059,245 @@ async function wireLspToEditor() {
   } catch (err) { toast(err.message, 'error'); }
 }
 
+/* ---------------- AI: inline completions + chat ---------------- */
+
+let aiInlineWired = new Set();
+let aiDebounceTimer = null;
+
+function initAi() {
+  // Load providers and key status.
+  return api.ai.providers().then((res) => {
+    if (res && Array.isArray(res.providers)) S.ai.providers = res.providers;
+    return api.ai.keyStatus();
+  }).then((res) => {
+    if (res && typeof res === 'object') S.ai.keyStatus = res;
+    S.ai.enabled = !!settings().ai.enabled;
+    S.ai.model = settings().ai.provider || 'openai';
+    S.ai.endpoint = '';
+  }).catch(() => {});
+}
+
+function hasAiKey(providerId) {
+  return S.ai.keyStatus && !!S.ai.keyStatus[providerId];
+}
+
+function wireAiCompletion(lang) {
+  if (!monaco || aiInlineWired.has(lang)) return;
+  if (typeof monaco.languages.registerInlineCompletionsProvider !== 'function') return;
+  aiInlineWired.add(lang);
+  monaco.languages.registerInlineCompletionsProvider(lang, {
+    provideInlineCompletions: async (model, position, context, token) => {
+      if (!S.ai || !S.ai.enabled) return { items: [] };
+      const provider = settings().ai.provider;
+      if (!provider || !hasAiKey(provider)) return { items: [] };
+      // Debounce: avoid hammering on every keystroke.
+      if (aiDebounceTimer) clearTimeout(aiDebounceTimer);
+      await new Promise((resolve) => { aiDebounceTimer = setTimeout(resolve, 300); });
+      if (token.isCancellationRequested) return { items: [] };
+      // Grab prefix/suffix.
+      const totalLines = model.getLineCount();
+      const endCol = model.getLineMaxColumn(totalLines);
+      const prefix = model.getValueInRange({
+        startLineNumber: 1, startColumn: 1,
+        endLineNumber: position.lineNumber, endColumn: position.column
+      });
+      const suffix = model.getValueInRange({
+        startLineNumber: position.lineNumber, startColumn: position.column,
+        endLineNumber: totalLines, endColumn: endCol
+      });
+      const language = model.getLanguageId();
+      try {
+        const res = await api.ai.complete({
+          provider: provider,
+          language: language,
+          prefix: prefix.slice(-8000),
+          suffix: suffix.slice(0, 2000)
+        });
+        const text = (res && res.completion) || '';
+        if (!text) return { items: [] };
+        return {
+          items: [{
+            insertText: text,
+            range: {
+              startLineNumber: position.lineNumber,
+              startColumn: position.column,
+              endLineNumber: position.lineNumber,
+              endColumn: position.column
+            }
+          }]
+        };
+      } catch (err) {
+        // Silently ignore inline completion errors.
+        return { items: [] };
+      }
+    },
+    freeInlineCompletions: () => {}
+  });
+}
+
+function wireAiLanguages() {
+  if (!monaco) return;
+  const langs = new Set();
+  try { for (const k of Object.keys(PB.LANGUAGES || {})) langs.add(PB.LANGUAGES[k]); } catch { /* ignore */ }
+  ['plaintext', 'javascript', 'typescript', 'python', 'json', 'html', 'css', 'markdown'].forEach((l) => langs.add(l));
+  for (const lang of langs) wireAiCompletion(lang);
+}
+
+async function triggerAiCompletion() {
+  const entry = currentEntry();
+  if (!entry || !S.editor || !S.editor.getModel()) { toast('Open a file first.', 'warn'); return; }
+  if (!S.ai.enabled) { toast('Enable AI in Settings first.', 'warn'); return; }
+  const provider = settings().ai.provider;
+  if (!provider || !hasAiKey(provider)) { toast('No API key set for ' + provider + '.', 'warn'); return; }
+  sizeEdit();
+  const lang = S.editor.getModel().getLanguageId();
+  wireAiCompletion(lang);
+  try {
+    S.editor.focus();
+    S.editor.trigger('ai', 'editor.action.inlineSuggest.trigger', {});
+  } catch (err) { toast(err.message, 'error'); }
+}
+
+async function openAiChat() {
+  const s = settings();
+  if (!s.ai.enabled) { toast('Enable AI in Settings first.', 'warn'); return; }
+  const provider = s.ai.provider;
+  if (!provider || !hasAiKey(provider)) { toast('No API key set for ' + provider + '.', 'warn'); return; }
+  const body = el('div', 'ai-chat-modal');
+  const question = el('textarea', 'ai-chat-question');
+  question.placeholder = 'Ask the AI to explain, refactor, or write code…';
+  question.rows = 4;
+  question.spellcheck = false;
+  const contextCheck = el('div', 'inline');
+  const includeCtx = el('input', null, '');
+  includeCtx.type = 'checkbox';
+  includeCtx.checked = true;
+  includeCtx.id = 'aiIncludeContext';
+  contextCheck.append(includeCtx, el('label', null, 'Include current file context'));
+  const response = el('div', 'ai-chat-response');
+  response.textContent = 'Ask a question to get started.';
+  body.append(question, contextCheck, response);
+  await showModal({
+    title: 'AI Chat',
+    body,
+    actions: [{ label: 'Close', value: null }],
+    onReady: ({ finish, body }) => {
+      const sendBtn = el('button', 'primary', 'Send');
+      sendBtn.style.marginTop = '8px';
+      footer.appendChild(sendBtn);
+      const send = async () => {
+        const q = question.value.trim();
+        if (!q) return;
+        sendBtn.disabled = true;
+        sendBtn.textContent = 'Thinking…';
+        response.textContent = '';
+        let ctx = '';
+        if (includeCtx.checked) {
+          const entry = currentEntry();
+          if (entry && entry.model) ctx = entry.model.getValue().slice(0, 12000);
+        }
+        try {
+          const res = await api.ai.chat({ provider: provider, question: q, context: ctx });
+          response.textContent = (res && res.text) || '';
+        } catch (err) {
+          response.textContent = 'Error: ' + err.message;
+        } finally {
+          sendBtn.disabled = false;
+          sendBtn.textContent = 'Send';
+        }
+      };
+      sendBtn.onclick = send;
+      question.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); send(); }
+      });
+      question.focus();
+    }
+  });
+}
+
+async function openAiSettings() {
+  const s = settings();
+  const body = el('div', 'ai-settings-body');
+  // Enable AI
+  const aiEnabled = checkbox(s.ai.enabled);
+  body.appendChild(settingsRow('Enable AI', 'Turn on AI-powered completions and chat.', aiEnabled));
+  // Provider list
+  const providers = S.ai.providers.length ? S.ai.providers : (PB.aiProviders ? PB.aiProviders() : []);
+  const providerSelect = selectInput(providers.map((p) => [p.id, p.label]), s.ai.provider);
+  body.appendChild(settingsRow('Provider', 'Choose the AI provider.', providerSelect));
+  // Model
+  const modelInput = textInput(s.ai.model || '', 'text');
+  modelInput.placeholder = 'e.g. gpt-4o-mini, claude-3-5-sonnet-latest';
+  body.appendChild(settingsRow('Model', 'Model name (leave blank for default).', modelInput));
+  // Endpoint override
+  const endpointInput = textInput(s.ai.endpoint || '', 'text');
+  endpointInput.placeholder = 'Optional custom endpoint URL';
+  body.appendChild(settingsRow('Endpoint', 'Override default endpoint (advanced).', endpointInput));
+  body.appendChild(el('hr'));
+  // Per-provider key inputs
+  const keyRows = el('div', 'ai-key-rows');
+  keyRows.appendChild(el('h4', null, 'API Keys'));
+  keyRows.appendChild(el('p', 'desc', 'Keys are stored encrypted locally and never leave this machine.'));
+  for (const prov of providers) {
+    const row = el('div', 'ai-key-row');
+    const label = el('label', null, prov.label + ' (' + prov.id + ')');
+    const status = S.ai.keyStatus && S.ai.keyStatus[prov.id] ? el('span', 'ai-key-status', 'Set (' + S.ai.keyStatus[prov.id] + ')') : el('span', 'ai-key-status empty', 'Not set');
+    const input = el('input', 'ai-key-input');
+    input.type = 'password';
+    input.placeholder = 'Enter API key…';
+    input.value = '';
+    const saveBtn = el('button', 'mini-btn', 'Save');
+    const clearBtn = el('button', 'mini-btn danger', 'Clear');
+    saveBtn.onclick = async () => {
+      const key = input.value.trim();
+      if (!key) { toast('Enter a key first.', 'warn'); return; }
+      saveBtn.disabled = true;
+      try {
+        const res = await api.ai.setKey({ provider: prov.id, key: key });
+        if (res.ok) {
+          status.textContent = 'Set (' + res.masked + ')';
+          status.className = 'ai-key-status';
+          input.value = '';
+          toast('Key saved for ' + prov.label, 'success', 1800);
+        } else {
+          toast(res.error || 'Failed to save key.', 'error');
+        }
+      } catch (err) { toast(err.message, 'error'); }
+      finally { saveBtn.disabled = false; }
+    };
+    clearBtn.onclick = async () => {
+      clearBtn.disabled = true;
+      try {
+        const res = await api.ai.setKey({ provider: prov.id, key: '' });
+        if (res.ok) {
+          status.textContent = 'Not set';
+          status.className = 'ai-key-status empty';
+          input.value = '';
+          toast('Key cleared for ' + prov.label, 'info', 1600);
+        } else {
+          toast(res.error || 'Failed to clear key.', 'error');
+        }
+      } catch (err) { toast(err.message, 'error'); }
+      finally { clearBtn.disabled = false; }
+    };
+    row.append(label, input, saveBtn, clearBtn, status);
+    keyRows.appendChild(row);
+  }
+  body.appendChild(keyRows);
+  await showModal({
+    title: 'AI Settings',
+    body,
+    actions: [{ label: 'Cancel', value: null }, { label: 'Save', value: 'save', class: 'primary' }]
+  });
+  // Apply AI settings to settings object
+  s.ai.enabled = aiEnabled.checked;
+  s.ai.provider = providerSelect.value;
+  s.ai.model = modelInput.value.trim();
+  s.ai.endpoint = endpointInput.value.trim();
+  persistSoon();
+  toast('AI settings saved', 'success', 1600);
+}
+
 /**
  * Explicitly fetches from origin and refreshes the Git view.
  */
@@ -2522,7 +2768,10 @@ function commandList() {
     { id: 'problems.show', label: 'View: Show Problems', run: () => runProblemsCheck() },
     { id: 'lsp.list', label: 'Language Servers: List', run: () => showLspServers() },
     { id: 'lsp.start', label: 'Language Servers: Start…', run: () => openLspStart() },
-    { id: 'lsp.wire', label: 'Language Servers: Wire to Current Editor', run: () => wireLspToEditor() }
+    { id: 'lsp.wire', label: 'Language Servers: Wire to Current Editor', run: () => wireLspToEditor() },
+    { id: 'ai.settings', label: 'AI: Open AI Settings', run: () => openAiSettings() },
+    { id: 'ai.chat', label: 'AI: Chat', run: () => openAiChat() },
+    { id: 'ai.complete', label: 'AI: Trigger Inline Completion', run: async () => { await triggerAiCompletion(); } }
   ];
 }
 
@@ -3042,6 +3291,24 @@ async function openSettings() {
   advanced.appendChild(settingsRow('Excluded folders', 'Comma-separated names skipped by search and indexing.', excludes));
   body.appendChild(advanced);
 
+  const aiSection = el('section', 'settings-section');
+  aiSection.appendChild(el('h4', null, 'AI'));
+  const aiEnabled = checkbox(s.ai.enabled);
+  aiSection.appendChild(settingsRow('Enable AI', 'Turn on AI-powered inline completions and chat.', aiEnabled));
+  const aiProviderList = (S.ai.providers.length ? S.ai.providers : (PB.aiProviders ? PB.aiProviders() : [])).map((p) => [p.id, p.label]);
+  const aiProvider = selectInput(aiProviderList, s.ai.provider);
+  aiSection.appendChild(settingsRow('Provider', 'Choose the AI provider.', aiProvider));
+  const aiModel = textInput(s.ai.model || '', 'text');
+  aiModel.placeholder = 'e.g. gpt-4o-mini, claude-3-5-sonnet-latest';
+  aiSection.appendChild(settingsRow('Model', 'Model name (leave blank for default).', aiModel));
+  const aiEndpoint = textInput(s.ai.endpoint || '', 'text');
+  aiEndpoint.placeholder = 'Optional custom endpoint URL';
+  aiSection.appendChild(settingsRow('Endpoint', 'Override default endpoint (advanced).', aiEndpoint));
+  const aiKeysBtn = el('button', 'mini-btn', 'Manage API Keys…');
+  aiKeysBtn.onclick = () => { openAiSettings(); };
+  aiSection.appendChild(settingsRow('API Keys', 'Set provider API keys (encrypted at rest).', aiKeysBtn));
+  body.appendChild(aiSection);
+
   const note = el('p', 'modal-note', 'Changes apply immediately after saving. Restart is not required.');
   body.appendChild(note);
 
@@ -3065,6 +3332,11 @@ async function openSettings() {
   s.terminalShell = shell.value.trim();
   s.excludes = excludes.value.trim() || PB.DEFAULT_EXCLUDES.join(', ');
   for (const key of Object.keys(runtimeInputs)) s.runtimes[key] = runtimeInputs[key].value.trim() || s.runtimes[key];
+
+  s.ai.enabled = aiEnabled.checked;
+  s.ai.provider = aiProvider.value;
+  s.ai.model = aiModel.value.trim();
+  s.ai.endpoint = aiEndpoint.value.trim();
 
   applyTheme();
   applyLayout();
