@@ -7,6 +7,8 @@ const fsp = fs.promises;
 const path = require('path');
 const os = require('os');
 const crypto = require('crypto');
+const http = require('http');
+const https = require('https');
 const { spawn, execFile } = require('child_process');
 const { StringDecoder } = require('string_decoder');
 const writeFileAtomic = require('write-file-atomic');
@@ -1318,6 +1320,53 @@ function decryptSecret(entry) {
   return '';
 }
 
+/** Perform an HTTP(S) request and resolve with { status, text, json }. */
+function httpSend(spec) {
+  const payload = spec.body === undefined || spec.body === null ? '' : String(spec.body);
+  const url = new URL(spec.url);
+  const isHttps = url.protocol === 'https:';
+  const transport = isHttps ? https : http;
+  const headers = Object.assign({}, spec.headers || {});
+  if (payload) headers['Content-Length'] = Buffer.byteLength(payload);
+  const options = {
+    hostname: url.hostname,
+    port: url.port || (isHttps ? 443 : 80),
+    path: url.pathname + url.search,
+    method: spec.method || 'GET',
+    headers: headers,
+    timeout: spec.timeoutMs || 30000
+  };
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const reqObj = transport.request(options, (res) => {
+      const chunks = [];
+      res.on('data', (c) => chunks.push(c));
+      res.on('end', () => {
+        if (settled) return;
+        settled = true;
+        const text = Buffer.concat(chunks).toString('utf8');
+        let json = null;
+        try { json = JSON.parse(text); } catch { /* ignore */ }
+        resolve({ status: res.statusCode, text: text, json: json });
+      });
+    });
+    reqObj.on('timeout', () => {
+      if (settled) return;
+      settled = true;
+      reqObj.destroy();
+      reject(new Error('timed out after ' + Math.round((spec.timeoutMs || 30000) / 1000) + 's'));
+    });
+    reqObj.on('error', (err) => {
+      if (settled) return;
+      settled = true;
+      const code = err && err.code ? ' (' + err.code + ')' : '';
+      reject(new Error((err && err.message || String(err)) + code));
+    });
+    if (payload) reqObj.write(payload);
+    reqObj.end();
+  });
+}
+
 async function aiRequest(opts) {
   const providerId = String((opts && opts.providerId) || '');
   const provider = PB.aiProviderById(providerId);
@@ -1334,30 +1383,17 @@ async function aiRequest(opts) {
     maxTokens: (opts && opts.maxTokens) || 1024,
     temperature: typeof (opts && opts.temperature) === 'number' ? opts.temperature : 0.2
   });
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 30000);
-  let res;
+  let result;
   try {
-    res = await fetch(req.url, {
-      method: 'POST',
-      headers: req.headers,
-      body: JSON.stringify(req.body),
-      signal: controller.signal
-    });
+    result = await httpSend({ url: req.url, method: 'POST', headers: req.headers, body: JSON.stringify(req.body), timeoutMs: 60000 });
   } catch (err) {
-    clearTimeout(timer);
-    const aborted = err && (err.name === 'AbortError' || /abort/i.test(String(err.message || '')));
-    throw new Error(aborted ? 'AI request timed out.' : ('AI request failed: ' + (err && err.message || err)));
+    throw new Error('Could not reach ' + provider.label + ': ' + (err && err.message || err));
   }
-  clearTimeout(timer);
-  const text = await res.text();
-  let json = null;
-  try { json = JSON.parse(text); } catch { /* ignore parse errors */ }
-  if (!res.ok) {
-    const detail = (json && json.error && (json.error.message || json.error)) || text || ('HTTP ' + res.status);
+  if (result.status < 200 || result.status >= 300) {
+    const detail = (result.json && result.json.error && (result.json.error.message || result.json.error)) || result.text || ('HTTP ' + result.status);
     throw new Error(String(detail).slice(0, 500));
   }
-  return { ok: true, text: PB.parseChatResponse(json, req.kind), raw: json };
+  return { ok: true, text: PB.parseChatResponse(result.json, req.kind), raw: result.json };
 }
 
 ipcMain.handle('ai:providers', () => ({ providers: PB.aiProviders() }));
@@ -1381,6 +1417,30 @@ ipcMain.handle('ai:setKey', (_, payload) => {
   else delete store[id];
   writeAiKeyStore(store);
   return { ok: true, provider: id, masked: key ? PB.maskSecret(key) : '' };
+});
+
+ipcMain.handle('ai:diagnose', async (_, payload) => {
+  const providerId = String((payload && payload.provider) || '');
+  const provider = PB.aiProviderById(providerId);
+  if (!provider) return { ok: false, error: 'Unknown AI provider: ' + providerId };
+  const store = readAiKeyStore();
+  const key = decryptSecret(store[providerId]);
+  if (provider.needsKey && !key) return { ok: false, error: 'No API key set for ' + provider.label + '.' };
+  let url;
+  if (provider.id === 'ollama') url = String(provider.endpoint).replace(/\/v1\/?$/, '') + '/api/tags';
+  else if (provider.kind === 'anthropic') url = String(provider.endpoint).replace(/\/+$/, '') + '/models';
+  else url = String(provider.endpoint).replace(/\/+$/, '') + '/models';
+  const headers = {};
+  if (provider.kind === 'anthropic') { if (key) headers['x-api-key'] = key; headers['anthropic-version'] = '2023-06-01'; }
+  else if (key) { if (provider.id === 'azure') headers['api-key'] = key; else headers['Authorization'] = 'Bearer ' + key; }
+  try {
+    const res = await httpSend({ url: url, method: 'GET', headers: headers, timeoutMs: 15000 });
+    if (res.status >= 200 && res.status < 300) return { ok: true, status: res.status, message: 'Connected to ' + provider.label + ' (HTTP ' + res.status + ').' };
+    const detail = (res.json && res.json.error && (res.json.error.message || res.json.error)) || res.text || ('HTTP ' + res.status);
+    return { ok: false, status: res.status, error: 'HTTP ' + res.status + ': ' + String(detail).slice(0, 300) };
+  } catch (err) {
+    return { ok: false, error: 'Could not reach ' + provider.label + ': ' + (err && err.message || err) };
+  }
 });
 
 ipcMain.handle('ai:complete', async (_, payload) => {

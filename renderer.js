@@ -2252,6 +2252,7 @@ async function openAiSettings() {
     input.value = '';
     const saveBtn = el('button', 'ai-key-btn', 'Save');
     const clearBtn = el('button', 'ai-key-btn danger', 'Clear');
+    const testBtn = el('button', 'ai-key-btn', 'Test connection');
     saveBtn.onclick = async () => {
       const key = input.value.trim();
       if (!key) { toast('Enter a key first.', 'warn'); return; }
@@ -2302,7 +2303,32 @@ async function openAiSettings() {
       } catch (err) { toast(err.message, 'error'); }
       finally { clearBtn.disabled = false; }
     };
-    row.append(label, input, saveBtn, clearBtn, status);
+    testBtn.onclick = async () => {
+      testBtn.disabled = true;
+      const oldLabel = testBtn.textContent;
+      testBtn.textContent = 'Testing…';
+      try {
+        const res = await api.ai.diagnose({ provider: prov.id });
+        if (res && res.ok) {
+          testBtn.textContent = '✓ Connected';
+          testBtn.classList.add('ok');
+          toast((res.message || 'Connected') + ' — provider is working.', 'success', 2500);
+        } else {
+          testBtn.textContent = '✗ Failed';
+          testBtn.classList.add('bad');
+          toast(res && res.error ? res.error : 'Connection failed.', 'error', 4500);
+        }
+        setTimeout(() => { testBtn.textContent = oldLabel; testBtn.classList.remove('ok', 'bad'); }, 3500);
+      } catch (err) {
+        testBtn.textContent = '✗ Failed';
+        testBtn.classList.add('bad');
+        toast(err.message, 'error', 4500);
+        setTimeout(() => { testBtn.textContent = oldLabel; testBtn.classList.remove('ok', 'bad'); }, 3500);
+      } finally {
+        testBtn.disabled = false;
+      }
+    };
+    row.append(label, input, saveBtn, clearBtn, testBtn, status);
     keyRows.appendChild(row);
   }
   body.appendChild(keyRows);
