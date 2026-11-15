@@ -1191,6 +1191,99 @@ ipcMain.handle('terminal:kill', (_, id) => {
   return true;
 });
 
+/* ---------------- IPC: language server (LSP) ---------------- */
+
+const lspServers = new Map();
+let lspSeq = 0;
+
+function startLspServer(payload) {
+  const id = String((payload && payload.id) || ('lsp-' + ++lspSeq));
+  const command = String((payload && payload.command) || '').trim();
+  const args = Array.isArray(payload && payload.args) ? payload.args.map((x) => String(x)) : [];
+  if (!command) return { ok: false, error: 'LSP server command is required.' };
+  const existing = lspServers.get(id);
+  if (existing) return { ok: true, id, alreadyRunning: true };
+
+  const cwd = payload && payload.cwd ? registeredRoot(payload.cwd) : app.getPath('home');
+  const child = spawn(command, args, { cwd, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
+  const server = { id, command, args, cwd, alive: true, capabilities: null, client: null };
+  const client = PB.createLspClient({ write: (s) => { try { child.stdin.write(s); } catch { /* ignore */ } } });
+  server.client = client;
+  lspServers.set(id, server);
+
+  child.stdout.on('data', (data) => client.onData(String(data)));
+  child.stderr.on('data', (data) => { /* stderr is consumed by protocol later */ });
+  child.on('exit', (code) => { server.alive = false; lspServers.delete(id); });
+  client.onNotification((msg) => {
+    const m = msg && msg.method;
+    if (!m) return;
+    if (m === 'textDocument/publishDiagnostics') {
+      send('lsp:diagnostics', { id, uri: String((msg && msg.params && msg.params.uri) || ''), diagnostics: (msg.params && msg.params.diagnostics) || [] });
+    }
+  });
+
+  return { ok: true, id, command, args, cwd };
+}
+
+ipcMain.handle('lsp:start', async (_, payload) => {
+  const res = startLspServer(payload);
+  if (!res.ok) return res;
+  const id = res.id;
+  if (lspServers.get(id)?.alive) return { ok: true, id, alreadyRunning: true };
+  await new Promise((resolve) => {
+    let settled = false;
+    const check = () => { if (!lspServers.get(id)?.alive) { if (!settled) { settled = true; resolve(true); } } };
+    const iv = setInterval(check, 250);
+    setTimeout(() => { clearInterval(iv); if (!settled) { settled = true; resolve(false); } }, 3000);
+    setImmediate(check);
+  });
+  const server = lspServers.get(id);
+  if (!server || !server.alive) return { ok: false, id, error: 'LSP server exited during startup.' };
+  return { ok: true, id, command: server.command, args: server.args, cwd: String(server.cwd) };
+});
+
+ipcMain.handle('lsp:stop', async (_, payload) => {
+  const id = String((payload && payload.id) || '');
+  const server = lspServers.get(id);
+  if (!server) return { ok: false, error: 'No LSP server registered with id: ' + id };
+  server.alive = false;
+  try { server.client.notify('shutdown', {}); } catch { /* ignore */ }
+  try { server.client.notify('exit', null); } catch { /* ignore */ }
+  try { server.client.write(JSON.stringify({ jsonrpc: '2.0', id: null, method: 'shutdown', params: {} })); } catch { /* ignore */ }
+  lspServers.delete(id);
+  try { server.child.kill(); } catch { /* ignore */ }
+  return { ok: true, id };
+});
+
+ipcMain.handle('lsp:request', async (_, payload) => {
+  const id = String((payload && payload.id) || '');
+  const method = String((payload && payload.method) || '');
+  if (!method) return { ok: false, error: 'LSP method required.' };
+  const server = lspServers.get(id);
+  if (!server) return { ok: false, error: 'No LSP server running with id: ' + id };
+  const result = await server.client.request(method, payload && payload.params);
+  return { ok: true, id, method, result };
+});
+
+ipcMain.handle('lsp:notify', async (_, payload) => {
+  const id = String((payload && payload.id) || '');
+  const method = String((payload && payload.method) || '');
+  if (!method) return { ok: false, error: 'LSP method required.' };
+  const server = lspServers.get(id);
+  if (!server) return { ok: false, error: 'No LSP server running with id: ' + id };
+  server.client.notify(method, payload && payload.params);
+  return { ok: true, id };
+});
+
+ipcMain.handle('lsp:list', async () => {
+  const servers = Array.from(lspServers.entries()).map(([id, s]) => ({ id, command: s.command, args: s.args, alive: s.alive }));
+  return { servers };
+});
+
+ipcMain.on('lsp:diagnostics', (_, payload) => {
+  send('lsp:diagnostics', payload);
+});
+
 /* ---------------- IPC: recovery ---------------- */
 
 ipcMain.handle('recovery:save', (_, payload) => {

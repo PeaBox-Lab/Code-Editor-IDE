@@ -95,6 +95,15 @@ contextBridge.exposeInMainWorld('api', {
     kill: (id) => invoke('terminal:kill', id)
   },
 
+  lsp: {
+    start: (payload) => invoke('lsp:start', payload),
+    stop: (payload) => invoke('lsp:stop', payload),
+    request: (payload) => invoke('lsp:request', payload),
+    notify: (payload) => invoke('lsp:notify', payload),
+    list: () => invoke('lsp:list'),
+    diagnostics: (payload) => send('lsp:diagnostics', payload)
+  },
+
   recovery: {
     list: () => invoke('recovery:list'),
     read: (file) => invoke('recovery:read', file),
@@ -115,6 +124,7 @@ contextBridge.exposeInMainWorld('api', {
     runExit: (cb) => subscribe('run:exit', cb),
     terminalData: (cb) => subscribe('terminal:data', cb),
     terminalExit: (cb) => subscribe('terminal:exit', cb),
+    lspDiagnostics: (cb) => subscribe('lsp:diagnostics', cb),
     closeRequest: (cb) => subscribe('app:close-request', cb)
   }
 });

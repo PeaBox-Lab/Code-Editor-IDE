@@ -1947,6 +1947,111 @@ async function gitBulk(kind) {
   } catch (err) { toast(err.message, 'error'); }
 }
 
+/* ---------------- language server (LSP) UI ---------------- */
+
+function lspRow(server) {
+  const row = el('div', 'lsp-row');
+  const name = el('span', 'lsp-name', server.id + ' · ' + server.command);
+  name.title = (server.args || []).join(' ');
+  row.appendChild(name);
+  const state = el('span', 'lsp-state ' + (server.alive ? 'alive' : 'dead'), server.alive ? 'running' : 'stopped');
+  row.appendChild(state);
+  return row;
+}
+
+async function showLspServers() {
+  try {
+    const res = await api.lsp.list();
+    const body = el('div', 'lsp-list');
+    const servers = (res && res.servers) || [];
+    if (!servers.length) body.appendChild(el('div', 'lsp-empty', 'No language servers running.'));
+    for (const s of servers) body.appendChild(lspRow(s));
+    await showModal({ title: 'Language Servers', body, actions: [{ label: 'Close', value: null }] });
+  } catch (err) { toast(err.message, 'error'); }
+}
+
+async function openLspStart() {
+  const body = el('div', 'lsp-form');
+  body.appendChild(el('div', 'lsp-hint', 'Start a language server that speaks LSP over stdio.'));
+  const mkField = (label, placeholder, value) => {
+    const wrap = el('div', 'lsp-field');
+    wrap.appendChild(el('label', 'lsp-label', label));
+    const input = el('input', 'lsp-input');
+    input.placeholder = placeholder;
+    input.value = value || '';
+    wrap.appendChild(input);
+    return wrap;
+  };
+  const idField = mkField('Server id', 'e.g. ts-lsp');
+  const cmdField = mkField('Command', 'e.g. typescript-language-server --stdio');
+  const argsField = mkField('Args (comma separated)', 'e.g. --stdio', '');
+  body.append(idField, cmdField, argsField);
+  const res = await showModal({
+    title: 'Start Language Server',
+    body,
+    actions: [{ label: 'Start', value: true, class: 'primary' }, { label: 'Cancel', value: null }]
+  });
+  if (!res) return;
+  const id = idField.querySelector('input').value.trim();
+  const command = cmdField.querySelector('input').value.trim();
+  const argsRaw = argsField.querySelector('input').value.trim();
+  if (!command) { toast('Command is required.', 'warn'); return; }
+  const args = argsRaw ? argsRaw.split(',').map((x) => x.trim()).filter(Boolean) : [];
+  try {
+    const start = await api.lsp.start({ id: id || undefined, command, args, cwd: S.root || undefined });
+    if (start && start.ok) {
+      toast('Language server ' + (start.alreadyRunning ? 'already running' : 'started') + ': ' + start.id, 'success', 2500);
+    } else {
+      toast((start && start.error) || 'Failed to start language server.', 'error', 4000);
+    }
+  } catch (err) { toast(err.message, 'error'); }
+}
+
+async function wireLspToEditor() {
+  const entry = currentEntry();
+  const editor = S.editor;
+  if (!entry || !editor || !editor.getModel()) { toast('Open a file first.', 'warn'); return; }
+  const model = editor.getModel();
+  const lang = model.getLanguageId();
+  try {
+    const res = await api.lsp.list();
+    const servers = (res && res.servers) || [];
+    const alive = servers.filter((s) => s.alive);
+    if (!alive.length) { toast('No running language servers.', 'warn'); return; }
+    const server = alive[0];
+    const caps = server.capabilities || {};
+    const lsp = api.lsp;
+    // Wire completion provider if supported.
+    if (PB.lspMethodCapable(caps, 'textDocument/completion')) {
+      monaco.languages.registerCompletionItemProvider(lang, {
+        provideCompletionItems: async (model, position) => {
+          const pos = PB.monacoPositionToLSP({ line: position.lineNumber - 1, column: position.column - 1 });
+          const result = await lsp.request({ id: server.id, method: 'textDocument/completion', params: {
+            textDocument: { uri: model.uri.toString() }, position: pos
+          } });
+          if (!result || !result.ok || !result.result) return { suggestions: [] };
+          const items = (result.result.items || result.result).map(PB.toMonacoCompletionItem).filter(Boolean);
+          return { suggestions: items };
+        }
+      });
+    }
+    // Wire hover provider if supported.
+    if (PB.lspMethodCapable(caps, 'textDocument/hover')) {
+      monaco.languages.registerHoverProvider(lang, {
+        provideHover: async (model, position) => {
+          const pos = PB.monacoPositionToLSP({ line: position.lineNumber - 1, column: position.column - 1 });
+          const result = await lsp.request({ id: server.id, method: 'textDocument/hover', params: {
+            textDocument: { uri: model.uri.toString() }, position: pos
+          } });
+          if (!result || !result.ok || !result.result) return null;
+          return PB.toMonacoHover(result.result);
+        }
+      });
+    }
+    toast('Wired LSP (' + server.id + ') for ' + lang + '.', 'success', 2500);
+  } catch (err) { toast(err.message, 'error'); }
+}
+
 /**
  * Explicitly fetches from origin and refreshes the Git view.
  */
@@ -2414,7 +2519,10 @@ function commandList() {
     { id: 'editor.format', label: 'Editor: Format Document', key: 'Shift+Alt+F', run: () => editorAction('editor.action.formatDocument') },
     { id: 'editor.formatOnSave', label: 'Editor: Toggle Format On Save', run: () => toggleFormatOnSave() },
     { id: 'problems.check', label: 'Problems: Check Current File', run: () => runProblemsCheck() },
-    { id: 'problems.show', label: 'View: Show Problems', run: () => runProblemsCheck() }
+    { id: 'problems.show', label: 'View: Show Problems', run: () => runProblemsCheck() },
+    { id: 'lsp.list', label: 'Language Servers: List', run: () => showLspServers() },
+    { id: 'lsp.start', label: 'Language Servers: Start…', run: () => openLspStart() },
+    { id: 'lsp.wire', label: 'Language Servers: Wire to Current Editor', run: () => wireLspToEditor() }
   ];
 }
 

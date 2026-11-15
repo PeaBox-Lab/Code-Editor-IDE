@@ -512,3 +512,118 @@ test('buildHunkPatch combines file header and hunk raw text', () => {
     ' context line\n' +
     '+added line\n');
 });
+
+test('utf8ByteLength counts multi-byte characters correctly', () => {
+  assert.strictEqual(PB.utf8ByteLength(''), 0);
+  assert.strictEqual(PB.utf8ByteLength('abc'), 3);
+  assert.strictEqual(PB.utf8ByteLength('héllo'), 6); // é = 2 bytes
+  assert.strictEqual(PB.utf8ByteLength('日本語'), 9); // 3 chars × 3 bytes
+  assert.strictEqual(PB.utf8ByteLength('a😀b'), 6); // a=1 + 😀(4) + b=1
+});
+
+test('encodeLSPMessage produces valid LSP framing', () => {
+  const framed = PB.encodeLSPMessage({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {} });
+  assert.ok(framed.startsWith('Content-Length: '));
+  assert.ok(framed.includes('\r\n\r\n'));
+  const headerEnd = framed.indexOf('\r\n\r\n');
+  const header = framed.slice(0, headerEnd);
+  const body = framed.slice(headerEnd + 4);
+  const m = header.match(/^Content-Length:\s*(\d+)$/);
+  assert.ok(m, 'header must declare Content-Length');
+  assert.strictEqual(Number(m[1]), Buffer.byteLength(body, 'utf8'));
+  assert.deepStrictEqual(JSON.parse(body), { jsonrpc: '2.0', id: 1, method: 'initialize', params: {} });
+});
+
+test('splitLSPMessages parses multiple frames and keeps partial tail', () => {
+  const msg1 = PB.encodeLSPMessage({ jsonrpc: '2.0', id: 1, result: { capabilities: {} } });
+  const msg2 = PB.encodeLSPMessage({ jsonrpc: '2.0', method: 'textDocument/publishDiagnostics', params: { uri: 'file:///a.js' } });
+  const combined = msg1 + msg2;
+  const parsed = PB.splitLSPMessages(combined);
+  assert.strictEqual(parsed.messages.length, 2);
+  assert.deepStrictEqual(parsed.messages[0], { jsonrpc: '2.0', id: 1, result: { capabilities: {} } });
+  assert.deepStrictEqual(parsed.messages[1].method, 'textDocument/publishDiagnostics');
+  assert.strictEqual(parsed.rest, '');
+
+  // Partial body should remain in rest
+  const partial = PB.splitLSPMessages(msg1.slice(0, msg1.length - 5));
+  assert.strictEqual(partial.messages.length, 0);
+  assert.strictEqual(partial.rest.length > 0, true);
+});
+
+test('lspMethodCapable detects supported methods in flat and nested capabilities', () => {
+  assert.strictEqual(PB.lspMethodCapable({ textDocument: { completion: {} } }, 'textDocument/completion'), true);
+  assert.strictEqual(PB.lspMethodCapable({ textDocument: { hover: {} } }, 'textDocument/hover'), true);
+  assert.strictEqual(PB.lspMethodCapable({ textDocument: {} }, 'textDocument/completion'), false);
+  assert.strictEqual(PB.lspMethodCapable({ 'textDocument/completion': {} }, 'textDocument/completion'), true);
+  assert.strictEqual(PB.lspMethodCapable(null, 'textDocument/completion'), false);
+});
+
+test('toMonacoCompletionItem maps LSP fields to Monaco shape', () => {
+  const item = PB.toMonacoCompletionItem({
+    label: 'foo', kind: 2, documentation: 'A function', detail: 'fn()', filterText: 'fo', sortText: 'a'
+  });
+  assert.strictEqual(item.label, 'foo');
+  assert.strictEqual(item.kind, 2);
+  assert.strictEqual(item.documentation, 'A function');
+  assert.strictEqual(item.detail, 'fn()');
+  assert.strictEqual(item.filterText, 'fo');
+  assert.strictEqual(item.sortText, 'a');
+  assert.strictEqual(PB.toMonacoCompletionItem(null), null);
+});
+
+test('lspPositionToMonaco and monacoPositionToLSP convert positions both ways', () => {
+  assert.deepStrictEqual(PB.lspPositionToMonaco({ line: 3, character: 7 }), { line: 3, column: 7 });
+  assert.deepStrictEqual(PB.monacoPositionToLSP({ line: 3, column: 7 }), { line: 3, character: 7 });
+  assert.deepStrictEqual(PB.lspPositionToMonaco(null), { line: 0, column: 0 });
+  assert.deepStrictEqual(PB.monacoPositionToLSP(null), { line: 0, character: 0 });
+});
+
+test('toMonacoHover maps LSP hover to Monaco shape', () => {
+  const hover = PB.toMonacoHover({ contents: [{ value: 'function foo()' }], range: { start: { line: 0, character: 0 } } });
+  assert.deepStrictEqual(hover.contents, [{ value: 'function foo()' }]);
+  assert.deepStrictEqual(hover.range, { start: { line: 0, character: 0 } });
+  assert.deepStrictEqual(PB.toMonacoHover(null), { contents: [] });
+});
+
+test('toMonacoLocation maps LSP location uri to string', () => {
+  const loc = PB.toMonacoLocation({ uri: { uri: 'file:///a.js' }, range: { start: { line: 1 } } });
+  assert.strictEqual(loc.uri, 'file:///a.js');
+  assert.deepStrictEqual(loc.range, { start: { line: 1 } });
+  assert.strictEqual(PB.toMonacoLocation(null), null);
+});
+
+test('createLspClient correlates requests and parses streamed responses', () => {
+  const sent = [];
+  const client = PB.createLspClient({ write: (s) => sent.push(s) });
+
+  // Fire request (id auto-incremented)
+  client.request('textDocument/hover', { position: { line: 0, character: 0 } });
+
+  // Simulate server reply
+  const reply = PB.encodeLSPMessage({ jsonrpc: '2.0', id: 1, result: { contents: [{ value: 'hi' }] } });
+  client.onData(reply);
+
+  assert.strictEqual(sent.length, 1);
+  assert.ok(sent[0].startsWith('Content-Length: '));
+  const body = JSON.parse(sent[0].split('\r\n\r\n')[1]);
+  assert.strictEqual(body.method, 'textDocument/hover');
+  assert.strictEqual(body.id, 1);
+  assert.strictEqual(client.pendingCount(), 0);
+});
+
+test('createLspClient handles error responses in notification dispatch', () => {
+  const client = PB.createLspClient({ write: () => {} });
+  client.request('textDocument/definition', {});
+  const errorReply = PB.encodeLSPMessage({ jsonrpc: '2.0', id: 1, error: { code: -32601, message: 'Method not found' } });
+  client.onData(errorReply);
+  assert.strictEqual(client.pendingCount(), 0);
+});
+
+test('createLspClient rejects requests on error responses', async () => {
+  const client = PB.createLspClient({ write: () => {} });
+  const p = client.request('textDocument/definition', {});
+  const err = await p.then(() => null, (e) => e);
+  client.onData(PB.encodeLSPMessage({ jsonrpc: '2.0', id: 1, error: { code: -32601, message: 'Method not found' } }));
+  assert.ok(err instanceof Error);
+  assert.strictEqual(err.message, 'Method not found');
+});

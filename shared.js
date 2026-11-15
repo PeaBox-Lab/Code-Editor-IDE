@@ -1006,6 +1006,154 @@
     return out;
   }
 
+  /* ---------------- LSP / JSON-RPC protocol helpers ---------------- */
+
+  /** Compute UTF-8 byte length of a string without Node's Buffer (renderer-safe). */
+  function utf8ByteLength(s) {
+    var n = 0;
+    for (var i = 0; i < s.length; i++) {
+      var c = s.charCodeAt(i);
+      if (c < 0x80) n += 1;
+      else if (c < 0x800) n += 2;
+      else if (c >= 0xD800 && c <= 0xDBFF) { n += 4; i++; }
+      else n += 3;
+    }
+    return n;
+  }
+
+  /** Encode a JSON-RPC 2.0 message using LSP stdio framing:
+   *  "Content-Length: <bytes>\r\n\r\n" + JSON body. */
+  function encodeLSPMessage(obj) {
+    var json = JSON.stringify(obj);
+    return 'Content-Length: ' + utf8ByteLength(json) + '\r\n\r\n' + json;
+  }
+
+  /** Split a raw LSP stdio buffer into complete JSON-RPC messages plus leftover tail. */
+  function splitLSPMessages(buffer) {
+    var rest = str(buffer);
+    var messages = [];
+    while (rest.length > 0) {
+      var idx = rest.indexOf('\r\n\r\n');
+      if (idx < 0) break;
+      var header = rest.substring(0, idx);
+      var m = header.match(/^Content-Length:\s*(\d+)$/);
+      if (!m) break;
+      var len = parseInt(m[1], 10);
+      var bodyStart = idx + 4;
+      if (rest.length < bodyStart + len) break;
+      var jsonBody = rest.substring(bodyStart, bodyStart + len);
+      var next;
+      try { next = JSON.parse(jsonBody); } catch (e) { break; }
+      messages.push(next);
+      rest = rest.substring(bodyStart + len);
+    }
+    return { messages: messages, rest: rest };
+  }
+
+  /** Check whether a server's declared capabilities include a method.
+   *  Accepts either a flat capabilities object or an InitializeResult. */
+  function lspMethodCapable(caps, method) {
+    if (!caps) return false;
+    var c = caps.capabilities ? caps.capabilities : caps;
+    if (c[method] !== undefined) return true;
+    // Common nested locations for textDocument providers.
+    var td = c.textDocument || {};
+    var short = method.indexOf('textDocument/') === 0 ? method.slice('textDocument/'.length) : method;
+    return td[short] !== undefined;
+  }
+
+  /** Map an LSP CompletionItem to a Monaco CompletionItem (minimal subset). */
+  function toMonacoCompletionItem(item) {
+    if (!item) return null;
+    var out = { label: item.label };
+    if (item.kind !== undefined) out.kind = item.kind;
+    if (item.documentation !== undefined) out.documentation = item.documentation;
+    if (item.detail !== undefined) out.detail = item.detail;
+    if (item.filterText !== undefined) out.filterText = item.filterText;
+    if (item.sortText !== undefined) out.sortText = item.sortText;
+    if (item.preselect !== undefined) out.preselect = item.preselect;
+    if (item.insertText !== undefined) out.insertText = item.insertText;
+    if (item.textEdit !== undefined) out.textEdit = item.textEdit;
+    return out;
+  }
+
+  /** LSP Position {line, character} -> Monaco position {line, column}. */
+  function lspPositionToMonaco(pos) {
+    if (!pos) return { line: 0, column: 0 };
+    return { line: pos.line, column: pos.character };
+  }
+
+  /** Monaco position {line, column} -> LSP Position {line, character}. */
+  function monacoPositionToLSP(pos) {
+    if (!pos) return { line: 0, character: 0 };
+    return { line: pos.line, character: pos.column };
+  }
+
+  /** Map an LSP Hover to a Monaco Hover shape. */
+  function toMonacoHover(hover) {
+    if (!hover) return { contents: [] };
+    return { contents: hover.contents, range: hover.range };
+  }
+
+  /** Map an LSP Location to Monaco's {uri, range}. */
+  function toMonacoLocation(loc) {
+    if (!loc) return null;
+    var uri = loc.uri;
+    if (uri && typeof uri === 'object') uri = uri.uri || uri.path || '';
+    return { uri: str(uri), range: loc.range };
+  }
+
+  /** Create a minimal, transport-agnostic LSP client.
+   *  @param {{write:function(string)}} transport - write() receives LSP-framed output.
+   *  @returns client with request(), notify(), onData(), onNotification().
+   */
+  function createLspClient(transport) {
+    var write = (transport && transport.write) || function () {};
+    var seq = 1;
+    var pending = {};
+    var buffer = '';
+    var listeners = [];
+
+    function dispatch(msg) {
+      if (!msg) return;
+      if (msg.id !== undefined && msg.id !== null && pending[msg.id]) {
+        var p = pending[msg.id];
+        delete pending[msg.id];
+        if (msg.error) p.reject(new Error((msg.error && msg.error.message) || 'LSP error'));
+        else p.resolve(msg.result);
+      }
+      if (typeof msg.method === 'string') {
+        for (var i = 0; i < listeners.length; i++) { try { listeners[i](msg); } catch (e) { /* ignore */ } }
+      }
+    }
+
+    function onData(chunk) {
+      buffer += str(chunk);
+      var parsed = splitLSPMessages(buffer);
+      buffer = parsed.rest;
+      for (var i = 0; i < parsed.messages.length; i++) dispatch(parsed.messages[i]);
+    }
+
+    function request(method, params) {
+      var id = seq++;
+      var promise = new Promise(function (resolve, reject) { pending[id] = { resolve: resolve, reject: reject }; });
+      write(encodeLSPMessage({ jsonrpc: '2.0', id: id, method: method, params: params }));
+      return promise;
+    }
+
+    function notify(method, params) {
+      write(encodeLSPMessage({ jsonrpc: '2.0', method: method, params: params }));
+    }
+
+    return {
+      request: request,
+      notify: notify,
+      onData: onData,
+      onNotification: function (fn) { listeners.push(fn); },
+      pendingCount: function () { return Object.keys(pending).length; }
+    };
+  }
+
   return {
     DEFAULT_EXCLUDES: DEFAULT_EXCLUDES,
     LANGUAGES: LANGUAGES,
@@ -1052,6 +1200,17 @@
     applyCarriageReturns: applyCarriageReturns,
     transformText: transformText,
     replaceInText: replaceInText,
+    // LSP / JSON-RPC protocol helpers
+    utf8ByteLength: utf8ByteLength,
+    encodeLSPMessage: encodeLSPMessage,
+    splitLSPMessages: splitLSPMessages,
+    lspMethodCapable: lspMethodCapable,
+    toMonacoCompletionItem: toMonacoCompletionItem,
+    lspPositionToMonaco: lspPositionToMonaco,
+    monacoPositionToLSP: monacoPositionToLSP,
+    toMonacoHover: toMonacoHover,
+    toMonacoLocation: toMonacoLocation,
+    createLspClient: createLspClient,
     defaultSession: defaultSession,
     sanitizeSession: sanitizeSession,
     reorderKeys: reorderKeys
