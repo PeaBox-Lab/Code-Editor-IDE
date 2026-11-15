@@ -2078,6 +2078,9 @@ function initAi() {
 }
 
 function hasAiKey(providerId) {
+  // Providers that don't require a key (e.g. Ollama local) are always usable.
+  const prov = (S.ai.providers || []).find((p) => p.id === providerId);
+  if (prov && prov.needsKey === false) return true;
   return S.ai.keyStatus && !!S.ai.keyStatus[providerId];
 }
 
