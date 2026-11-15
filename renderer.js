@@ -505,7 +505,11 @@ function initMonaco() {
       overviewRulerBorder: false,
       fixedOverflowWidgets: true,
       bracketPairColorization: { enabled: true },
-      guides: { bracketPairs: true, indentation: true }
+      guides: { bracketPairs: true, indentation: true },
+      autoClosingBrackets: 'always',
+      autoClosingQuotes: 'always',
+      autoIndent: 'full',
+      formatOnType: false
     });
 
     S.editor.onDidChangeCursorPosition((e) => {
@@ -3028,6 +3032,15 @@ function commandList() {
     { id: 'editor.replace', label: 'Editor: Replace', key: 'Ctrl+H', run: () => editorAction('editor.action.startFindReplaceAction') },
     { id: 'editor.gotoLine', label: 'Editor: Go to Line…', key: 'Ctrl+G', run: () => editorAction('editor.action.gotoLine') },
     { id: 'editor.format', label: 'Editor: Format Document', key: 'Shift+Alt+F', run: () => editorAction('editor.action.formatDocument') },
+    { id: 'editor.foldAll', label: 'Editor: Fold All', run: () => editorAction('editor.action.foldAll') },
+    { id: 'editor.unfoldAll', label: 'Editor: Unfold All', run: () => editorAction('editor.action.unfoldAll') },
+    { id: 'editor.toggleFolds', label: 'Editor: Toggle All Folds', run: () => editorAction('editor.action.toggleAllFolding') },
+    { id: 'editor.multiCursorNext', label: 'Editor: Add Cursor at Next Match', key: 'Ctrl+D', run: () => editorAction('editor.action.addSelectionToNextFindMatch') },
+    { id: 'editor.multiCursorAll', label: 'Editor: Select All Occurrences', key: 'Ctrl+Shift+L', run: () => editorAction('editor.action.selectHighlights') },
+    { id: 'editor.cursorAbove', label: 'Editor: Add Cursor Above', key: 'Ctrl+Alt+↑', run: () => editorAction('editor.action.insertCursorAbove') },
+    { id: 'editor.cursorBelow', label: 'Editor: Add Cursor Below', key: 'Ctrl+Alt+↓', run: () => editorAction('editor.action.insertCursorBelow') },
+    { id: 'editor.deleteLine', label: 'Editor: Delete Line', key: 'Ctrl+Shift+K', run: () => editorAction('editor.action.deleteLines') },
+    { id: 'editor.toggleComment', label: 'Editor: Toggle Line Comment', key: 'Ctrl+/', run: () => editorAction('editor.action.toggleComment') },
     { id: 'editor.formatOnSave', label: 'Editor: Toggle Format On Save', run: () => toggleFormatOnSave() },
     { id: 'problems.check', label: 'Problems: Check Current File', run: () => runProblemsCheck() },
     { id: 'problems.show', label: 'View: Show Problems', run: () => runProblemsCheck() },
@@ -3136,11 +3149,12 @@ function applyTextTransform(id) {
   toast('Transformed ' + nameOf(entry.path), 'success', 1800);
 }
 
-function editorAction(id) {
+function editorAction(id, args) {
   if (!S.editor) return;
   S.editor.focus();
   const action = S.editor.getAction(id);
-  if (action) action.run();
+  if (action) { action.run(); return; }
+  try { S.editor.trigger('peabox', id, args || {}); } catch { /* command id not registered */ }
 }
 
 function toggleTheme() {
@@ -3796,7 +3810,16 @@ function handleMenuCommand(payload) {
     'run.stop': () => stopRun(),
     'editor.find': () => editorAction('actions.find'),
     'editor.replace': () => editorAction('editor.action.startFindReplaceAction'),
-    'editor.gotoLine': () => editorAction('editor.action.gotoLine')
+    'editor.gotoLine': () => editorAction('editor.action.gotoLine'),
+    'editor.foldAll': () => editorAction('editor.action.foldAll'),
+    'editor.unfoldAll': () => editorAction('editor.action.unfoldAll'),
+    'editor.toggleFolds': () => editorAction('editor.action.toggleAllFolding'),
+    'editor.multiCursorNext': () => editorAction('editor.action.addSelectionToNextFindMatch'),
+    'editor.multiCursorAll': () => editorAction('editor.action.selectHighlights'),
+    'editor.cursorAbove': () => editorAction('editor.action.insertCursorAbove'),
+    'editor.cursorBelow': () => editorAction('editor.action.insertCursorBelow'),
+    'editor.deleteLine': () => editorAction('editor.action.deleteLines'),
+    'editor.toggleComment': () => editorAction('editor.action.toggleComment')
   };
   const fn = map[id];
   if (fn) fn();
@@ -3849,6 +3872,10 @@ function onKeyDown(event) {
   if (mod && !event.shiftKey && lower === 'f') { event.preventDefault(); editorAction('actions.find'); return; }
   if (mod && !event.shiftKey && lower === 'h') { event.preventDefault(); editorAction('editor.action.startFindReplaceAction'); return; }
   if (event.altKey && event.shiftKey && lower === 'f') { event.preventDefault(); editorAction('editor.action.formatDocument'); return; }
+  if (mod && !event.shiftKey && lower === 'd') { event.preventDefault(); editorAction('editor.action.addSelectionToNextFindMatch'); return; }
+  if (mod && event.shiftKey && lower === 'l') { event.preventDefault(); editorAction('editor.action.selectHighlights'); return; }
+  if (mod && event.shiftKey && lower === 'k') { event.preventDefault(); editorAction('editor.action.deleteLines'); return; }
+  if (mod && lower === '/') { event.preventDefault(); editorAction('editor.action.toggleComment'); return; }
   if (key === 'F5') { event.preventDefault(); if (event.shiftKey) stopRun(); else runCurrent(); return; }
 }
 
