@@ -231,10 +231,15 @@ function runProcess(exe, args, options) {
     try {
       child = spawn(exe, (args || []).map(String), {
         cwd: options.cwd, shell: false, windowsHide: true,
-        env: options.env || process.env, stdio: ['ignore', 'pipe', 'pipe']
+        env: options.env || process.env,
+        stdio: options.input == null ? ['ignore', 'pipe', 'pipe'] : ['pipe', 'pipe', 'pipe']
       });
     } catch (err) {
       return resolve({ code: -1, stdout: '', stderr: err.message, timedOut: false, duration: 0 });
+    }
+    if (options.input != null && child.stdin) {
+      child.stdin.on('error', () => { /* ignore broken pipe */ });
+      child.stdin.end(String(options.input));
     }
     let stdout = '', stderr = '', done = false, timedOut = false;
     const timer = setTimeout(() => {
@@ -875,6 +880,23 @@ ipcMain.handle('git:unstage', gitFileAction((dir, file) => git(dir, ['restore', 
 ipcMain.handle('git:discard', gitFileAction((dir, file) => git(dir, ['restore', '--', file], 30000)));
 ipcMain.handle('git:stageAll', (_, cwd) => git(registeredRoot(cwd), ['add', '-A'], 60000));
 ipcMain.handle('git:unstageAll', (_, cwd) => git(registeredRoot(cwd), ['reset'], 60000));
+
+// Per-hunk staging/unstaging via `git apply --cached` / `--reverse` with stdin patch.
+ipcMain.handle('git:stageHunk', async (_, payload) => {
+  const dir = registeredRoot(payload && payload.cwd);
+  const patch = String((payload && payload.patch) || '');
+  if (!dir || !patch) throw new Error('Missing file or patch.');
+  const res = await runProcess('git', ['apply', '--cached', '-p1'], { cwd: dir, env: gitEnv(), timeout: 30000, input: patch });
+  return { ok: res.code === 0, code: res.code, timedOut: res.timedOut, stdout: res.stdout, stderr: res.stderr, text: (res.stdout || res.stderr || '').trim() };
+});
+
+ipcMain.handle('git:unstageHunk', async (_, payload) => {
+  const dir = registeredRoot(payload && payload.cwd);
+  const patch = String((payload && payload.patch) || '');
+  if (!dir || !patch) throw new Error('Missing file or patch.');
+  const res = await runProcess('git', ['apply', '--cached', '--reverse', '-p1'], { cwd: dir, env: gitEnv(), timeout: 30000, input: patch });
+  return { ok: res.code === 0, code: res.code, timedOut: res.timedOut, stdout: res.stdout, stderr: res.stderr, text: (res.stdout || res.stderr || '').trim() };
+});
 
 ipcMain.handle('git:commit', async (_, payload) => {
   const dir = registeredRoot(payload && payload.cwd);

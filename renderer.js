@@ -1673,6 +1673,7 @@ function gitRow(change, staged) {
 
   const actions = el('div', 'git-actions');
   actions.appendChild(gitAction('diff', 'Show diff', () => openDiff(change, staged)));
+  actions.appendChild(gitAction('list', 'Show hunks', () => openHunkDiff(change, staged)));
   if (staged) actions.appendChild(gitAction('close', 'Unstage', () => gitSimple('unstage', change, 'Unstaged')));
   else if (change.untracked) actions.appendChild(gitAction('plus', 'Stage', () => gitSimple('stage', change, 'Staged')));
   else {
@@ -1721,6 +1722,57 @@ async function openDiff(change, staged) {
     const res = await api.git.diff({ cwd: S.root, file: change.path, staged });
     const header = '# ' + change.path + ' · ' + (staged ? 'staged' : 'working tree') + '\n\n';
     openVirtual('Δ ' + PB.basename(change.path) + (staged ? ' (staged)' : ''), header + (res.stdout || '(no diff available)'));
+  } catch (err) { toast(err.message, 'error'); }
+}
+
+/* ---------------- per-hunk staging UI ---------------- */
+
+async function openHunkDiff(change, staged) {
+  if (!S.root) return;
+  try {
+    const res = await api.git.diff({ cwd: S.root, file: change.path, staged });
+    const hunks = PB.parseGitHunks(res.stdout || '');
+    if (!hunks.length) { toast('No hunks in this diff', 'info', 1500); return; }
+    const host = $('gitChanges');
+    const overlay = el('div', 'hunk-overlay');
+    const title = el('div', 'hunk-title');
+    title.innerHTML = '<span class="muted">Hunks · </span><span class="muted">' + PB.escapeHtml(change.path) + '</span>' +
+      (staged ? ' <span class="muted">· staged</span>' : '');
+    const close = el('button', 'mini-btn');
+    close.title = 'Close';
+    close.appendChild(icon('close'));
+    close.onclick = () => overlay.remove();
+    const head = el('div', 'hunk-head');
+    head.append(title, close);
+    overlay.appendChild(head);
+    const list = el('div', 'hunk-list');
+    for (const h of hunks) {
+      const card = el('div', 'hunk-card');
+      const meta = el('div', 'hunk-meta');
+      meta.textContent = 'L' + h.newStart + ' · ' + h.addedCount + '+' + h.removedCount + ' · ' + PB.basename(change.path);
+      card.appendChild(meta);
+      const code = el('pre', 'hunk-code');
+      code.textContent = h.raw;
+      card.appendChild(code);
+      const btn = el('button', 'mini-btn');
+      btn.textContent = staged ? 'Unstage hunk' : 'Stage hunk';
+      btn.onclick = async () => {
+        const patch = PB.buildHunkPatch(h);
+        try {
+          const action = staged ? 'unstageHunk' : 'stageHunk';
+          const r = await api.git[action]({ cwd: S.root, patch });
+          if (r && r.ok) { toast((staged ? 'Unstaged' : 'Staged') + ' hunk in ' + PB.basename(change.path), 'success', 1500); }
+          else { toast(r && r.text ? r.text : 'Hunk action failed', 'error'); }
+          overlay.remove();
+          await refreshGit();
+        } catch (err) { toast(err.message, 'error'); }
+      };
+      card.appendChild(btn);
+      list.appendChild(card);
+    }
+    overlay.appendChild(list);
+    overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+    host.appendChild(overlay);
   } catch (err) { toast(err.message, 'error'); }
 }
 

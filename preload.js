@@ -55,6 +55,8 @@ contextBridge.exposeInMainWorld('api', {
     diff: (payload) => invoke('git:diff', payload),
     stage: (payload) => invoke('git:stage', payload),
     unstage: (payload) => invoke('git:unstage', payload),
+    stageHunk: (payload) => invoke('git:stageHunk', payload),
+    unstageHunk: (payload) => invoke('git:unstageHunk', payload),
     discard: (payload) => invoke('git:discard', payload),
     stageAll: (cwd) => invoke('git:stageAll', cwd),
     unstageAll: (cwd) => invoke('git:unstageAll', cwd),

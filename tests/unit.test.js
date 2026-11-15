@@ -414,3 +414,58 @@ test('reorderKeys moves items without mutating the input', () => {
   assert.deepEqual(PB.reorderKeys(['a', 'b'], 'z', 'a'), ['a', 'b']);
   assert.deepEqual(PB.reorderKeys([], 'a', 'b'), []);
 });
+
+test('parseGitHunks parses unified diff into hunks', () => {
+  const diff = 'diff --git a/foo.js b/foo.js\n' +
+    'index abc1234..def5678 100644\n' +
+    '--- a/foo.js\n' +
+    '+++ b/foo.js\n' +
+    '@@ -1,3 +1,3 @@\n' +
+    ' context line\n' +
+    '+added line\n' +
+    ' context line\n' +
+    '-removed line\n' +
+    '+added line2\n' +
+    '--- a/bar.js\n' +
+    '+++ b/bar.js\n' +
+    '@@ -5,2 +5,3 @@\n' +
+    ' context\n' +
+    '+added\n' +
+    '+added2\n';
+  const hunks = PB.parseGitHunks(diff);
+  assert.deepEqual(hunks.length, 2);
+  assert.deepEqual(hunks[0].context, 'context line\ncontext line\n');
+  assert.deepEqual(hunks[0].added, 'added line\nadded line2\n');
+  assert.deepEqual(hunks[0].removed, 'removed line\n');
+  assert.strictEqual(hunks[0].staged, false);
+  assert.strictEqual(hunks[0].addedCount, 2);
+  assert.strictEqual(hunks[0].removedCount, 1);
+  assert.deepEqual(hunks[1].context, 'context\n');
+  assert.deepEqual(hunks[1].added, 'added\nadded2\n');
+  assert.strictEqual(hunks[1].addedCount, 2);
+  assert.strictEqual(hunks[1].staged, false);
+  assert.deepEqual(hunks[0].fileHeader, [
+    'diff --git a/foo.js b/foo.js',
+    'index abc1234..def5678 100644',
+    '--- a/foo.js',
+    '+++ b/foo.js'
+  ]);
+  assert.strictEqual(hunks[0].path, 'foo.js');
+  assert.strictEqual(hunks[0].newStart, 1);
+  assert.strictEqual(hunks[0].newLines, 3);
+});
+
+test('buildHunkPatch combines file header and hunk raw text', () => {
+  const hunk = {
+    fileHeader: ['diff --git a/foo.js b/foo.js', 'index abc1234..def5678 100644', '--- a/foo.js', '+++ b/foo.js'],
+    raw: '@@ -1,3 +1,3 @@\n context line\n+added line\n'
+  };
+  const patch = PB.buildHunkPatch(hunk);
+  assert.deepEqual(patch, 'diff --git a/foo.js b/foo.js\n' +
+    'index abc1234..def5678 100644\n' +
+    '--- a/foo.js\n' +
+    '+++ b/foo.js\n' +
+    '@@ -1,3 +1,3 @@\n' +
+    ' context line\n' +
+    '+added line\n');
+});

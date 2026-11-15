@@ -681,6 +681,77 @@
   }
 
   /**
+   * Parses Git diff output into per-hunk records (file header + unified diff hunk).
+   * Each hunk keeps its content lines and a ready-to-apply patch fragment.
+   * @param {string} diffText - Raw git diff output (stdout).
+   * @returns {Array<{context:string, added:string, removed:string, staged:boolean, header:string, raw:string, fileHeader:string[], path:string, oldStart:number, oldLines:number, newStart:number, newLines:number, addedCount:number, removedCount:number}>}
+   */
+  function parseGitHunks(diffText) {
+    var lines = str(diffText).split(/\r?\n/);
+    var hunks = [];
+    var current = null;
+    var inHunk = false;
+    var fileHeader = [];
+    var filePath = '';
+    for (var i = 0; i < lines.length; i++) {
+      var ln = lines[i];
+      if (/^diff --git /.test(ln)) {
+        if (current) { hunks.push(current); current = null; }
+        inHunk = false;
+        fileHeader = [ln];
+        filePath = (ln.match(/^diff --git a\/(.+?) b\/(.+)$/) || [])[2] || '';
+        continue;
+      }
+      if (/^(?:index|---|\+\+\+|new file mode|deleted file mode|old mode|new mode|similarity index|dissimilarity index|rename from|rename to|Binary files|GIT binary patch) /.test(ln)) {
+        if (inHunk) { if (current) { hunks.push(current); current = null; } inHunk = false; }
+        fileHeader.push(ln);
+        continue;
+      }
+      if (/^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/.test(ln)) {
+        if (current) hunks.push(current);
+        var m = ln.match(/^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/);
+        current = {
+          context: '',
+          added: '',
+          removed: '',
+          staged: false,
+          header: ln,
+          raw: ln + '\n',
+          fileHeader: fileHeader.slice(),
+          path: filePath,
+          oldStart: m ? Number(m[1]) : 0,
+          oldLines: m && m[2] !== undefined ? Number(m[2]) : 1,
+          newStart: m ? Number(m[3]) : 0,
+          newLines: m && m[4] !== undefined ? Number(m[4]) : 1,
+          addedCount: 0,
+          removedCount: 0
+        };
+        inHunk = true;
+        continue;
+      }
+      if (!inHunk) continue;
+      if (ln === '\\ No newline at end of file') { current.raw += ln + '\n'; continue; }
+      if (ln.startsWith(' ')) { current.context += ln.slice(1) + '\n'; current.raw += ln + '\n'; continue; }
+      if (ln.startsWith('+')) { current.added += ln.slice(1) + '\n'; current.addedCount += 1; current.raw += ln + '\n'; continue; }
+      if (ln.startsWith('-')) { current.removed += ln.slice(1) + '\n'; current.removedCount += 1; current.raw += ln + '\n'; continue; }
+    }
+    if (current) hunks.push(current);
+    return hunks;
+  }
+
+  /**
+   * Builds a single-hunk git patch fragment (file header + hunk) from a parsed hunk.
+   * @param {object} hunk - Hunk record from parseGitHunks.
+   * @returns {string} Patch text suitable for `git apply`.
+   */
+  function buildHunkPatch(hunk) {
+    var h = hunk || { fileHeader: [], raw: '' };
+    var header = Array.isArray(h.fileHeader) ? h.fileHeader.join('\n') : '';
+    var body = h.raw || '';
+    return header ? header + '\n' + body : body;
+  }
+
+  /**
    * Applies a named text transform.
    * @param {string} content - Document text.
    * @param {string} id - Transform id (format-json, sort-lines, dedupe-lines, trim-trailing-whitespace).
@@ -894,6 +965,8 @@
     fuzzyMatchCommands: fuzzyMatchCommands,
     parseGitStatus: parseGitStatus,
     parseGitStatusPorcelain: parseGitStatusPorcelain,
+    parseGitHunks: parseGitHunks,
+    buildHunkPatch: buildHunkPatch,
     boundaryMatch: boundaryMatch,
     validateEntryName: validateEntryName,
     validateBranchName: validateBranchName,
