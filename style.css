@@ -272,6 +272,16 @@ kbd {
   max-height: 22vh; overflow: auto;
 }
 .hunk-list { list-style: none; padding-left: 0; }
+.history-modal-body { max-height: 50vh; overflow: auto; display: flex; flex-direction: column; gap: 6px; }
+.history-card { border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px; margin-bottom: 4px; display: flex; flex-direction: column; }
+.history-meta { font-size: 10.5px; color: var(--muted); }
+.no-commits { font-size: 11px; color: var(--muted); padding: 8px; }
+.blame-modal-body { max-height: 50vh; overflow: auto; display: flex; flex-direction: column; gap: 6px; }
+.blame-card { border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px; margin-bottom: 4px; display: flex; flex-direction: column; }
+.blame-meta { font-size: 10.5px; color: var(--muted); }
+.blame-text { font-family: Consolas, monospace; font-size: 10.5px; white-space: pre-wrap; word-break: break-all; color: var(--text); max-height: 22vh; overflow: auto; }
+.blame-info { font-size: 10px; color: var(--muted); margin-top: 4px; }
+.no-blame { font-size: 11px; color: var(--muted); padding: 8px; }
 .git-empty { padding: 10px 14px; color: var(--faint); font-size: 11.5px; }
 .commit-box { border-top: 1px solid var(--border); padding: 8px 10px 6px; }
 .commit-box textarea {

@@ -68,6 +68,9 @@ contextBridge.exposeInMainWorld('api', {
     fetch: (cwd) => invoke('git:fetch', cwd),
     stash: (cwd) => invoke('git:stash', cwd),
     stashPop: (cwd) => invoke('git:stashPop', cwd),
+    show: (payload) => invoke('git:show', payload),
+    log: (cwd) => invoke('git:log', { cwd: cwd }),
+    blame: (cwd) => invoke('git:blame', { cwd: cwd }),
     remote: (cwd) => invoke('git:remote', cwd)
   },
 

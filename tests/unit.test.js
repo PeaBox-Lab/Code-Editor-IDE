@@ -455,6 +455,49 @@ test('parseGitHunks parses unified diff into hunks', () => {
   assert.strictEqual(hunks[0].newLines, 3);
 });
 
+test('parseGitLog parses tab-separated commit records', () => {
+  const text = 'abc1234def5678\tJohn Doe\tjohn@example.com\t2026-11-15T10:00:00Z\tfix the thing\n' +
+    'fff1111eee2222\tJane\tjane@example.com\t2026-11-14T09:30:00Z\tadd helper\n';
+  const commits = PB.parseGitLog(text);
+  assert.deepEqual(commits.length, 2);
+  assert.deepEqual(commits[0], {
+    hash: 'abc1234def5678', shortHash: 'abc1234', author: 'John Doe', email: 'john@example.com', date: '2026-11-15T10:00:00Z', subject: 'fix the thing'
+  });
+  assert.deepEqual(commits[1].subject, 'add helper');
+});
+
+test('parseGitBlame builds line records from porcelain output', () => {
+  const shaA = 'deadbeef00112233deadbeef00112233deadbeef';
+  const shaB = '0123456789abcdef0123456789abcdef01234567';
+  const text = shaA + ' 42 42\n' +
+    'author Alice\n' +
+    'author-mail <alice@example.com>\n' +
+    'author-time 1725\n' +
+    'committer-time 1725\n' +
+    'summary some change\n' +
+    'filename file.js\n' +
+    '\tmodified line here\n' +
+    shaB + ' 43 43\n' +
+    'author Bob\n' +
+    'author-mail <bob@example.com>\n' +
+    'author-time 1726\n' +
+    'committer-time 1726\n' +
+    'summary def\n' +
+    'filename file.js\n' +
+    '\tdef\n';
+  const records = PB.parseGitBlame(text);
+  assert.equal(records.length, 2);
+  assert.equal(records[0].author, 'Alice');
+  assert.equal(records[0].authorMail, '<alice@example.com>');
+  assert.equal(records[0].text, 'modified line here');
+  assert.equal(records[0].origLine, 42);
+  assert.equal(records[0].line, 42);
+  assert.equal(records[1].author, 'Bob');
+  assert.equal(records[1].text, 'def');
+  assert.equal(records[1].origLine, 43);
+  assert.equal(records[1].line, 43);
+});
+
 test('buildHunkPatch combines file header and hunk raw text', () => {
   const hunk = {
     fileHeader: ['diff --git a/foo.js b/foo.js', 'index abc1234..def5678 100644', '--- a/foo.js', '+++ b/foo.js'],

@@ -318,6 +318,69 @@
     return out;
   }
 
+  /**
+   * Parses `git log -n N --pretty=format:%H%x00%an%x00%ae%x00%aI%x00%s` output.
+   * Fields are tab-separated: hash, author, email, iso-date, subject.
+   * @param {string} stdout - Raw log output.
+   * @returns {Array<{hash:string, shortHash:string, author:string, email:string, date:string, subject:string}>}
+   */
+  function parseGitLog(stdout) {
+    var lines = str(stdout).split(/\r?\n/);
+    var commits = [];
+    for (var i = 0; i < lines.length; i++) {
+      var line = lines[i];
+      if (!line) continue;
+      var f = line.split('\t');
+      if (f.length < 5) continue;
+      var hash = f[0], author = f[1], email = f[2], date = f[3];
+      var subject = f.slice(4).join('\t'); // subject may contain tabs escaped or remaining
+      commits.push({ hash: hash, shortHash: hash.slice(0, 7), author: author, email: email, date: date, subject: subject });
+    }
+    return commits;
+  }
+
+  /**
+   * Parses `git blame -p -z` output into per-line blame records.
+   * Each record: { hash, author, authorMail, time, line, origLine, text }.
+   * Header line format: `<sha> <orig-line> <final-line> [<num-lines>]`.
+   * @param {string} stdout - Raw porcelain blame output.
+   * @returns {Array<{hash:string, author:string, authorMail:string, time:number, line:number, origLine:number, text:string}>}
+   */
+  function parseGitBlame(stdout) {
+    var lines = str(stdout).split(/\r?\n/);
+    var records = [];
+    var cur = null;
+    var lastHash = null;
+    for (var i = 0; i < lines.length; i++) {
+      var ln = lines[i];
+      if (ln === '' || ln === '\0') { cur = null; continue; }
+      var hdr = ln.match(/^([0-9a-f]{40}) (\d+) (\d+)(?: (\d+))?$/);
+      if (hdr) {
+        cur = {
+          hash: hdr[1],
+          author: '',
+          authorMail: '',
+          time: 0,
+          line: Number(hdr[3]) || 0,
+          origLine: Number(hdr[2]) || 0,
+          text: ''
+        };
+        lastHash = hdr[1];
+        continue;
+      }
+      if (!cur) continue;
+      if (ln.indexOf('author ') === 0) cur.author = ln.slice(7);
+      else if (ln.indexOf('author-mail ') === 0) cur.authorMail = ln.slice(12);
+      else if (ln.indexOf('author-time ') === 0) cur.time = Number(ln.slice(12)) || 0;
+      else if (ln.charAt(0) === '\t') {
+        cur.text = ln.slice(1);
+        records.push(cur);
+        cur = null;
+      }
+    }
+    return records;
+  }
+
   function isWordChar(ch) { return !!ch && /[A-Za-z0-9_]/.test(ch); }
 
   function boundaryMatch(line, index, length) {
@@ -965,6 +1028,8 @@
     fuzzyMatchCommands: fuzzyMatchCommands,
     parseGitStatus: parseGitStatus,
     parseGitStatusPorcelain: parseGitStatusPorcelain,
+    parseGitLog: parseGitLog,
+    parseGitBlame: parseGitBlame,
     parseGitHunks: parseGitHunks,
     buildHunkPatch: buildHunkPatch,
     boundaryMatch: boundaryMatch,

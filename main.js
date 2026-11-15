@@ -946,6 +946,33 @@ ipcMain.handle('git:fetch', async (_, cwd) => {
 });
 ipcMain.handle('git:stash', (_, cwd) => git(registeredRoot(cwd), ['stash', 'push', '-u', '-m', 'PeaBox ' + new Date().toISOString()], 60000));
 ipcMain.handle('git:stashPop', (_, cwd) => git(registeredRoot(cwd), ['stash', 'pop'], 60000));
+ipcMain.handle('git:show', async (_, payload) => {
+  const dir = registeredRoot(payload && payload.cwd);
+  if (!dir) throw new Error('No cwd specified');
+  try {
+    const res = await git(dir, ['show', '-p', '--', payload.file ? [payload.file] : []], 30000);
+    return { ok: true, code: 0, timedOut: false, stdout: res.stdout || '', stderr: '', text: (res.stdout || '').trim() };
+  } catch (err) { return { ok: false, code: 0, timedOut: false, stdout: '', stderr: err.message }; }
+});
+
+// Per-file log and blame retrieval.
+ipcMain.handle('git:log', async (_, payload) => {
+  const dir = registeredRoot(payload && payload.cwd);
+  if (!dir) throw new Error('No cwd specified');
+  const args = ['log', '-n', '50', '--pretty=format:%H%t%an%t%ae%t%aI%t%s'];
+  if (payload && payload.file) args.push('--', payload.file);
+  const lines = await git(dir, args, 30000);
+  return { ok: true, code: 0, timedOut: false, stdout: lines, stderr: '', text: (lines || '').trim() };
+});
+
+ipcMain.handle('git:blame', async (_, payload) => {
+  const dir = registeredRoot(payload && payload.cwd);
+  if (!dir) throw new Error('No cwd specified');
+  const args = ['blame', '-p', '-z'];
+  if (payload && payload.file) args.push('--', payload.file);
+  const lines = await git(dir, args, 30000);
+  return { ok: true, code: 0, timedOut: false, stdout: lines, stderr: '', text: (lines || '').trim() };
+});
 
 ipcMain.handle('git:remote', async (_, cwd) => {
   const dir = registeredRoot(cwd);

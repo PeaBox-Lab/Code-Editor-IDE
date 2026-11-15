@@ -1674,6 +1674,8 @@ function gitRow(change, staged) {
   const actions = el('div', 'git-actions');
   actions.appendChild(gitAction('diff', 'Show diff', () => openDiff(change, staged)));
   actions.appendChild(gitAction('list', 'Show hunks', () => openHunkDiff(change, staged)));
+  actions.appendChild(gitAction('history', 'Show history', () => openFileHistory(change.path)));
+  actions.appendChild(gitAction('blame', 'Show blame', () => openFileBlame(change.path)));
   if (staged) actions.appendChild(gitAction('close', 'Unstage', () => gitSimple('unstage', change, 'Unstaged')));
   else if (change.untracked) actions.appendChild(gitAction('plus', 'Stage', () => gitSimple('stage', change, 'Staged')));
   else {
@@ -1759,6 +1761,90 @@ async function openHunkDiff(change, staged) {
     }
     await showModal({
       title: 'Hunks · ' + PB.basename(change.path) + (staged ? ' (staged)' : ''),
+      body,
+      actions: [{ label: 'Close', value: null }]
+    });
+  } catch (err) { toast(err.message, 'error'); }
+}
+
+/* ---------------- history / blame UI ---------------- */
+
+async function openFileHistory(path) {
+  if (!S.root) return;
+  try {
+    const res = await api.git.log({ cwd: S.root, file: path });
+    if (!res || !res.ok) { toast(res && res.text ? res.text : 'Failed to fetch history', 'error'); return; }
+    const commits = PB.parseGitLog(res.stdout || '');
+    const body = el('div', 'history-modal-body');
+    body.replaceChildren();
+
+    if (!commits.length) {
+      body.appendChild(el('div', 'no-commits', 'No commit history for this file.'));
+    } else {
+      commits.forEach((c, i) => {
+        const card = el('div', 'history-card');
+        const meta = el('div', 'history-meta');
+        meta.textContent = `${c.shortHash} ${c.date} ${c.subject}`;
+        card.appendChild(meta);
+
+        const diffBtn = el('button', 'mini-btn');
+        diffBtn.textContent = 'Diff';
+        diffBtn.onclick = async () => {
+          const showRes = await api.git.show({ cwd: S.root, hash: c.hash, file: path });
+          if (showRes && showRes.ok) {
+            await openVirtual(`📄 ${c.shortHash} ${PB.basename(path)} (${c.subject})`);
+            openVirtual(showRes.stdout || '(no diff)');
+          } else {
+            toast(showRes && showRes.text ? showRes.text : 'Failed to show diff', 'error');
+          }
+        };
+        card.appendChild(diffBtn);
+
+        body.appendChild(card);
+      });
+    }
+
+    await showModal({
+      title: 'History · ' + PB.basename(path),
+      body,
+      actions: [{ label: 'Close', value: null }]
+    });
+  } catch (err) { toast(err.message, 'error'); }
+}
+
+async function openFileBlame(path) {
+  if (!S.root) return;
+  try {
+    const res = await api.git.blame({ cwd: S.root, file: path });
+    if (!res || !res.ok) { toast(res && res.text ? res.text : 'Failed to fetch blame', 'error'); return; }
+    const records = PB.parseGitBlame(res.stdout || '');
+    const body = el('div', 'blame-modal-body');
+    body.replaceChildren();
+
+    if (!records.length) {
+      body.appendChild(el('div', 'no-blame', 'No blame information available.'));
+      return;
+    }
+
+    records.forEach(record => {
+      const card = el('div', 'blame-card');
+      const meta = el('div', 'blame-meta');
+      meta.textContent = `L${record.line} (${record.hash.slice(0, 7)})`;
+      card.appendChild(meta);
+
+      const text = el('pre', 'blame-text');
+      text.textContent = record.text;
+      card.appendChild(text);
+
+      const info = el('div', 'blame-info');
+      info.textContent = `${record.author} <${record.authorMail}>`;
+      card.appendChild(info);
+
+      body.appendChild(card);
+    });
+
+    await showModal({
+      title: 'Blame · ' + PB.basename(path),
       body,
       actions: [{ label: 'Close', value: null }]
     });
