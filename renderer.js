@@ -2306,6 +2306,7 @@ async function openAiSettings() {
   s.ai.provider = providerSelect.value;
   s.ai.model = modelInput.value.trim();
   s.ai.endpoint = endpointInput.value.trim();
+  S.ai.enabled = aiEnabled.checked;   // ✅ Keep runtime cache in sync
   persistSoon();
   toast('AI settings saved', 'success', 1600);
 }
@@ -3568,6 +3569,7 @@ async function openSettings() {
   s.ai.provider = aiProvider.value;
   s.ai.model = aiModel.value.trim();
   s.ai.endpoint = aiEndpoint.value.trim();
+  S.ai.enabled = aiEnabled.checked;   // ✅ Keep runtime cache in sync
 
   applyTheme();
   applyLayout();
