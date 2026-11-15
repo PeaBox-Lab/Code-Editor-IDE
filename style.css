@@ -313,6 +313,9 @@ button.primary:hover { filter: brightness(1.08); }
 .breadcrumb .crumb:last-child { color: var(--muted); }
 .editor-area { flex: 1; min-height: 0; position: relative; display: flex; flex-direction: column; }
 .editor { flex: 1; min-height: 0; position: relative; }
+.editor-area.split { flex-direction: row; }
+.editor-area.split .editor { flex: 1; min-width: 0; }
+#editor2 { border-left: 1px solid var(--border); }
 
 /* welcome */
 .welcome {

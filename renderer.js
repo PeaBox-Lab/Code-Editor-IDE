@@ -42,7 +42,9 @@ const S = {
   closePrompt: false,
   recoveryOffered: false,
   panel: 'terminalPane',
-  problems: []
+  problems: [],
+  editor2: null,
+  current2: null
 };
 
 const settings = () => S.state.settings;
@@ -270,6 +272,16 @@ function applyEditorOptions() {
     minimap: { enabled: s.minimap },
     stickyScroll: s.stickyScroll
   });
+  if (S.editor2) {
+    S.editor2.updateOptions({
+      fontSize: s.fontSize,
+      fontFamily: s.fontFamily,
+      tabSize: s.tabSize,
+      wordWrap: s.wordWrap ? 'on' : 'off',
+      minimap: { enabled: s.minimap },
+      stickyScroll: s.stickyScroll
+    });
+  }
   $('spacesStatus').textContent = 'Spaces: ' + s.tabSize;
 }
 
@@ -1011,6 +1023,7 @@ function activateEntry(key) {
   hideContextMenu();
   S.editor.updateOptions({ readOnly: !!entry.virtual });
   S.editor.setModel(entry.model);
+  if (S.editor2) syncSplitModel();
   if (!entry.virtual) {
     const line = PB.clamp(entry.cursorLine || 1, 1, Math.max(1, entry.model.getLineCount()));
     const column = PB.clamp(entry.cursorColumn || 1, 1, 100000);
@@ -1205,6 +1218,7 @@ async function closeEntry(entry, force) {
   clearTimeout(entry.recoveryTimer);
   clearTimeout(entry.autosaveTimer);
   if (!entry.virtual) api.file.watchStop(entry.path).catch(() => {});
+  if (S.editor2 && S.current2 === entry.key) { try { S.editor2.setModel(null); } catch { /* ignore */ } S.current2 = null; }
   try { entry.model.dispose(); } catch { /* ignore */ }
   S.models.delete(entry.key);
   if (S.current === entry.key) {
@@ -1214,6 +1228,7 @@ async function closeEntry(entry, force) {
     if (next) S.editor.setModel(next.model);
     else S.editor.setModel(null);
   }
+  if (S.editor2) syncSplitModel();
   syncEditorState();
   persistSoon();
   return true;
@@ -2216,6 +2231,7 @@ function commandList() {
     { id: 'view.wordWrap', label: 'View: Toggle Word Wrap', run: () => toggleWordWrap() },
     { id: 'view.stickyScroll', label: 'View: Toggle Sticky Scroll', key: 'Ctrl+Shift+S', run: () => toggleStickyScroll() },
     { id: 'view.outline', label: 'View: Show Outline', key: 'Ctrl+Shift+U', run: () => showView('outline') },
+    { id: 'view.split', label: 'View: Toggle Split Editor', key: 'Ctrl+\\', run: () => toggleSplit() },
     { id: 'view.symbols', label: 'View: Go to Symbol…', key: 'Ctrl+Shift+O', run: () => openPalette('symbols') },
     { id: 'view.zoomIn', label: 'View: Increase Editor Font Size', key: 'Ctrl+=', run: () => zoomEditor(1) },
     { id: 'view.zoomOut', label: 'View: Decrease Editor Font Size', key: 'Ctrl+-', run: () => zoomEditor(-1) },
@@ -2270,6 +2286,61 @@ function toggleStickyScroll() {
   applyEditorOptions();
   persistSoon();
   toast('Sticky scroll ' + (s.stickyScroll ? 'enabled' : 'disabled'), 'info', 1600);
+}
+
+function editorOptions() {
+  return {
+    theme: resolvedTheme() === 'dark' ? 'peabox-dark' : 'peabox-light',
+    automaticLayout: true,
+    fontSize: settings().fontSize,
+    fontFamily: settings().fontFamily,
+    tabSize: settings().tabSize,
+    wordWrap: settings().wordWrap ? 'on' : 'off',
+    minimap: { enabled: settings().minimap },
+    smoothScrolling: true,
+    stickyScroll: settings().stickyScroll,
+    cursorBlinking: 'smooth',
+    cursorSmoothCaretAnimation: 'on',
+    renderWhitespace: 'selection',
+    renderLineHighlight: 'all',
+    scrollBeyondLastLine: false,
+    padding: { top: 10, bottom: 10 },
+    overviewRulerBorder: false,
+    fixedOverflowWidgets: true,
+    bracketPairColorization: { enabled: true },
+    guides: { bracketPairs: true, indentation: true }
+  };
+}
+
+function toggleSplit() {
+  const area = $('editorArea');
+  const host2 = $('editor2');
+  if (S.editor2) {
+    try { S.editor2.dispose(); } catch { /* ignore */ }
+    S.editor2 = null;
+    S.current2 = null;
+    setHidden(host2, true);
+    area.classList.remove('split');
+    if (S.editor && S.editor.layout) S.editor.layout();
+    toast('Split editor closed', 'info', 1400);
+    return;
+  }
+  const entry = currentEntry();
+  if (!entry || entry.virtual) { toast('Open a regular file first.', 'info', 1800); return; }
+  setHidden(host2, false);
+  area.classList.add('split');
+  S.editor2 = monaco.editor.create($('editor2'), Object.assign(editorOptions(), { model: entry.model }));
+  S.current2 = entry.key;
+  if (S.editor && S.editor.layout) S.editor.layout();
+  toast('Split editor opened', 'info', 1400);
+}
+
+function syncSplitModel() {
+  if (!S.editor2) return;
+  const entry = currentEntry();
+  if (!entry) { S.current2 = null; return; }
+  S.current2 = entry.key;
+  try { S.editor2.setModel(entry.model); } catch (err) { /* model may be disposed */ }
 }
 
 function applyTextTransform(id) {
@@ -2760,6 +2831,7 @@ function showShortcuts() {
     ['Save all', 'Ctrl+Alt+S'],
     ['Close editor', 'Ctrl+W'],
     ['Toggle sidebar', 'Ctrl+B'],
+    ['Toggle split editor', 'Ctrl+\\'],
     ['Toggle panel', 'Ctrl+J'],
     ['Terminal', 'Ctrl+`'],
     ['Explorer', 'Ctrl+Shift+E'],
@@ -2916,6 +2988,7 @@ function handleMenuCommand(payload) {
     'view.zoomIn': () => zoomEditor(1),
     'view.zoomOut': () => zoomEditor(-1),
     'view.zoomReset': () => zoomEditor(0),
+    'editor.split': () => toggleSplit(),
     'terminal.toggle': () => terminalToggle(),
     'run.start': () => runCurrent(),
     'run.stop': () => stopRun(),
@@ -2968,6 +3041,7 @@ function onKeyDown(event) {
   if (mod && (key === '-' || key === '_')) { event.preventDefault(); zoomEditor(-1); return; }
   if (mod && key === '0') { event.preventDefault(); zoomEditor(0); return; }
   if (mod && !event.shiftKey && key === '`') { event.preventDefault(); terminalToggle(); return; }
+  if (mod && key === '\\') { event.preventDefault(); toggleSplit(); return; }
   if (mod && key === ',') { event.preventDefault(); openSettings(); return; }
   if (mod && !event.shiftKey && lower === 'g') { event.preventDefault(); editorAction('editor.action.gotoLine'); return; }
   if (mod && !event.shiftKey && lower === 'f') { event.preventDefault(); editorAction('actions.find'); return; }
