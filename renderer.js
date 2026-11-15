@@ -2072,14 +2072,15 @@ function initAi() {
   }).then((res) => {
     if (res && typeof res === 'object') S.ai.keyStatus = res;
     S.ai.enabled = !!settings().ai.enabled;
-    S.ai.model = settings().ai.provider || 'openai';
-    S.ai.endpoint = '';
+    S.ai.model = settings().ai.model || '';
+    S.ai.endpoint = settings().ai.endpoint || '';
   }).catch(() => {});
 }
 
 function hasAiKey(providerId) {
   // Providers that don't require a key (e.g. Ollama local) are always usable.
-  const prov = (S.ai.providers || []).find((p) => p.id === providerId);
+  const list = (S.ai.providers && S.ai.providers.length) ? S.ai.providers : (PB.aiProviders ? PB.aiProviders() : []);
+  const prov = list.find((p) => p.id === providerId);
   if (prov && prov.needsKey === false) return true;
   return S.ai.keyStatus && !!S.ai.keyStatus[providerId];
 }
@@ -2184,7 +2185,7 @@ async function openAiChat() {
     title: 'AI Chat',
     body,
     actions: [{ label: 'Close', value: null }],
-    onReady: ({ finish, body }) => {
+    onReady: ({ finish, body, footer }) => {
       const sendBtn = el('button', 'primary', 'Send');
       sendBtn.style.marginTop = '8px';
       footer.appendChild(sendBtn);
@@ -3982,6 +3983,9 @@ async function boot() {
     toast('Could not load your session: ' + err.message, 'error', 6000);
   }
   if (!S.state || !S.state.settings) S.state = PB.defaultState();
+
+  // Load AI providers, saved key status, and enabled flag from main process / settings.
+  await initAi();
 
   applyTheme();
   applyLayout();

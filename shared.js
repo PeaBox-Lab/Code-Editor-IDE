@@ -1398,6 +1398,11 @@
     buildChatRequest: buildChatRequest,
     parseChatResponse: parseChatResponse,
     extractCodeFence: extractCodeFence,
-    maskSecret: maskSecret
+    maskSecret: maskSecret,
+    aiCompletionMessages: aiCompletionMessages,
+    aiChatMessages: aiChatMessages,
+    aiCodegenMessages: aiCodegenMessages,
+    aiScaffoldMessages: aiScaffoldMessages,
+    aiEditMessages: aiEditMessages
   };
 });
