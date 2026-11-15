@@ -3041,6 +3041,18 @@ function commandList() {
     { id: 'editor.cursorBelow', label: 'Editor: Add Cursor Below', key: 'Ctrl+Alt+↓', run: () => editorAction('editor.action.insertCursorBelow') },
     { id: 'editor.deleteLine', label: 'Editor: Delete Line', key: 'Ctrl+Shift+K', run: () => editorAction('editor.action.deleteLines') },
     { id: 'editor.toggleComment', label: 'Editor: Toggle Line Comment', key: 'Ctrl+/', run: () => editorAction('editor.action.toggleComment') },
+    { id: 'editor.blockComment', label: 'Editor: Toggle Block Comment', key: 'Shift+Alt+A', run: () => editorAction('editor.action.blockComment') },
+    { id: 'editor.formatSelection', label: 'Editor: Format Selection', key: 'Ctrl+Alt+F', run: () => editorAction('editor.action.formatSelection') },
+    { id: 'editor.indentLines', label: 'Editor: Indent Selection', run: () => editorAction('editor.action.indentLines') },
+    { id: 'editor.outdentLines', label: 'Editor: Outdent Selection', run: () => editorAction('editor.action.outdentLines') },
+    { id: 'editor.joinLines', label: 'Editor: Join Lines', run: () => editorAction('editor.action.joinLines') },
+    { id: 'editor.copyLineDown', label: 'Editor: Duplicate Line Down', key: 'Shift+Alt+↓', run: () => editorAction('editor.action.copyLinesDownAction') },
+    { id: 'editor.copyLineUp', label: 'Editor: Duplicate Line Up', key: 'Shift+Alt+↑', run: () => editorAction('editor.action.copyLinesUpAction') },
+    { id: 'editor.moveLineDown', label: 'Editor: Move Line Down', key: 'Alt+↓', run: () => editorAction('editor.action.moveLinesDownAction') },
+    { id: 'editor.moveLineUp', label: 'Editor: Move Line Up', key: 'Alt+↑', run: () => editorAction('editor.action.moveLinesUpAction') },
+    { id: 'editor.jumpToBracket', label: 'Editor: Jump to Matching Bracket', key: 'Ctrl+Shift+\\', run: () => editorAction('editor.action.jumpToBracket') },
+    { id: 'editor.insertLineBefore', label: 'Editor: Insert Line Above', key: 'Ctrl+Shift+Enter', run: () => editorAction('editor.action.insertLineBefore') },
+    { id: 'editor.insertLineAfter', label: 'Editor: Insert Line Below', key: 'Ctrl+Enter', run: () => editorAction('editor.action.insertLineAfter') },
     { id: 'editor.formatOnSave', label: 'Editor: Toggle Format On Save', run: () => toggleFormatOnSave() },
     { id: 'problems.check', label: 'Problems: Check Current File', run: () => runProblemsCheck() },
     { id: 'problems.show', label: 'View: Show Problems', run: () => runProblemsCheck() },
@@ -3819,7 +3831,19 @@ function handleMenuCommand(payload) {
     'editor.cursorAbove': () => editorAction('editor.action.insertCursorAbove'),
     'editor.cursorBelow': () => editorAction('editor.action.insertCursorBelow'),
     'editor.deleteLine': () => editorAction('editor.action.deleteLines'),
-    'editor.toggleComment': () => editorAction('editor.action.toggleComment')
+    'editor.toggleComment': () => editorAction('editor.action.toggleComment'),
+    'editor.blockComment': () => editorAction('editor.action.blockComment'),
+    'editor.formatSelection': () => editorAction('editor.action.formatSelection'),
+    'editor.indentLines': () => editorAction('editor.action.indentLines'),
+    'editor.outdentLines': () => editorAction('editor.action.outdentLines'),
+    'editor.joinLines': () => editorAction('editor.action.joinLines'),
+    'editor.copyLineDown': () => editorAction('editor.action.copyLinesDownAction'),
+    'editor.copyLineUp': () => editorAction('editor.action.copyLinesUpAction'),
+    'editor.moveLineDown': () => editorAction('editor.action.moveLinesDownAction'),
+    'editor.moveLineUp': () => editorAction('editor.action.moveLinesUpAction'),
+    'editor.jumpToBracket': () => editorAction('editor.action.jumpToBracket'),
+    'editor.insertLineBefore': () => editorAction('editor.action.insertLineBefore'),
+    'editor.insertLineAfter': () => editorAction('editor.action.insertLineAfter')
   };
   const fn = map[id];
   if (fn) fn();
@@ -3866,16 +3890,29 @@ function onKeyDown(event) {
   if (mod && (key === '-' || key === '_')) { event.preventDefault(); zoomEditor(-1); return; }
   if (mod && key === '0') { event.preventDefault(); zoomEditor(0); return; }
   if (mod && !event.shiftKey && key === '`') { event.preventDefault(); terminalToggle(); return; }
-  if (mod && key === '\\') { event.preventDefault(); toggleSplit(); return; }
+  if (mod && key === '\\') { event.preventDefault(); if (event.shiftKey) { editorAction('editor.action.jumpToBracket'); } else { toggleSplit(); } return; }
   if (mod && key === ',') { event.preventDefault(); openSettings(); return; }
   if (mod && !event.shiftKey && lower === 'g') { event.preventDefault(); editorAction('editor.action.gotoLine'); return; }
   if (mod && !event.shiftKey && lower === 'f') { event.preventDefault(); editorAction('actions.find'); return; }
   if (mod && !event.shiftKey && lower === 'h') { event.preventDefault(); editorAction('editor.action.startFindReplaceAction'); return; }
   if (event.altKey && event.shiftKey && lower === 'f') { event.preventDefault(); editorAction('editor.action.formatDocument'); return; }
+  if (event.altKey && event.shiftKey && lower === 'a') { event.preventDefault(); editorAction('editor.action.blockComment'); return; }
+  if (mod && event.altKey && lower === 'f') { event.preventDefault(); editorAction('editor.action.formatSelection'); return; }
   if (mod && !event.shiftKey && lower === 'd') { event.preventDefault(); editorAction('editor.action.addSelectionToNextFindMatch'); return; }
   if (mod && event.shiftKey && lower === 'l') { event.preventDefault(); editorAction('editor.action.selectHighlights'); return; }
   if (mod && event.shiftKey && lower === 'k') { event.preventDefault(); editorAction('editor.action.deleteLines'); return; }
   if (mod && lower === '/') { event.preventDefault(); editorAction('editor.action.toggleComment'); return; }
+  if (mod && key === 'Enter') {
+    if (isTypingTarget(event.target)) return;
+    event.preventDefault();
+    if (event.shiftKey) editorAction('editor.action.insertLineBefore');
+    else editorAction('editor.action.insertLineAfter');
+    return;
+  }
+  if (event.altKey && event.shiftKey && key === 'ArrowDown') { event.preventDefault(); editorAction('editor.action.copyLinesDownAction'); return; }
+  if (event.altKey && event.shiftKey && key === 'ArrowUp') { event.preventDefault(); editorAction('editor.action.copyLinesUpAction'); return; }
+  if (event.altKey && key === 'ArrowDown') { event.preventDefault(); editorAction('editor.action.moveLinesDownAction'); return; }
+  if (event.altKey && key === 'ArrowUp') { event.preventDefault(); editorAction('editor.action.moveLinesUpAction'); return; }
   if (key === 'F5') { event.preventDefault(); if (event.shiftKey) stopRun(); else runCurrent(); return; }
 }
 
