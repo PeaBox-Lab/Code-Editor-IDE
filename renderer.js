@@ -2249,8 +2249,8 @@ async function openAiSettings() {
     input.type = 'password';
     input.placeholder = 'Enter API key…';
     input.value = '';
-    const saveBtn = el('button', 'mini-btn', 'Save');
-    const clearBtn = el('button', 'mini-btn danger', 'Clear');
+    const saveBtn = el('button', 'ai-key-btn', 'Save');
+    const clearBtn = el('button', 'ai-key-btn danger', 'Clear');
     saveBtn.onclick = async () => {
       const key = input.value.trim();
       if (!key) { toast('Enter a key first.', 'warn'); return; }
