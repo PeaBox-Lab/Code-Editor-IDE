@@ -263,23 +263,15 @@ kbd {
 .git-actions { display: flex; gap: 1px; opacity: 0; }
 .git-change:hover .git-actions { opacity: 1; }
 .git-actions .mini-btn { width: 21px; height: 21px; }
-.hunk-overlay {
-  background: var(--bg-2); border: 1px solid var(--border); padding: 8px 12px;
-  margin-bottom: 6px; display: flex; flex-direction: column; gap: 4px;
-}
-.hunk-title {
-  font-size: 11px; color: var(--muted);
-}
-.hunk-list {
-  list-style: none; padding-left: 0;
-}
-.hunk-card {
-  border: 1px solid var(--border); padding: 6px 10px; margin-bottom: 4px;
-}
+.hunk-modal-body { max-height: 50vh; overflow: auto; display: flex; flex-direction: column; gap: 6px; }
+.hunk-card { border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px; display: flex; flex-direction: column; gap: 4px; }
+.hunk-meta { font-size: 10.5px; color: var(--muted); }
 .hunk-code {
-  font-family: 'Consolas', monospace; font-size: 10px; color: var(--yellow);
-  text-align: center; letter-spacing: -.5px; white-space: pre-wrap;
+  font-family: Consolas, monospace; font-size: 10.5px; margin: 0;
+  white-space: pre-wrap; word-break: break-all; color: var(--text);
+  max-height: 22vh; overflow: auto;
 }
+.hunk-list { list-style: none; padding-left: 0; }
 .git-empty { padding: 10px 14px; color: var(--faint); font-size: 11.5px; }
 .commit-box { border-top: 1px solid var(--border); padding: 8px 10px 6px; }
 .commit-box textarea {

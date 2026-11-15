@@ -1733,23 +1733,11 @@ async function openHunkDiff(change, staged) {
     const res = await api.git.diff({ cwd: S.root, file: change.path, staged });
     const hunks = PB.parseGitHunks(res.stdout || '');
     if (!hunks.length) { toast('No hunks in this diff', 'info', 1500); return; }
-    const host = $('gitChanges');
-    const overlay = el('div', 'hunk-overlay');
-    const title = el('div', 'hunk-title');
-    title.innerHTML = '<span class="muted">Hunks · </span><span class="muted">' + PB.escapeHtml(change.path) + '</span>' +
-      (staged ? ' <span class="muted">· staged</span>' : '');
-    const close = el('button', 'mini-btn');
-    close.title = 'Close';
-    close.appendChild(icon('close'));
-    close.onclick = () => overlay.remove();
-    const head = el('div', 'hunk-head');
-    head.append(title, close);
-    overlay.appendChild(head);
-    const list = el('div', 'hunk-list');
+    const body = el('div', 'hunk-modal-body');
     for (const h of hunks) {
       const card = el('div', 'hunk-card');
       const meta = el('div', 'hunk-meta');
-      meta.textContent = 'L' + h.newStart + ' · ' + h.addedCount + '+' + h.removedCount + ' · ' + PB.basename(change.path);
+      meta.textContent = 'L' + h.newStart + ' · +' + h.addedCount + ' −' + h.removedCount + ' · ' + PB.basename(change.path);
       card.appendChild(meta);
       const code = el('pre', 'hunk-code');
       code.textContent = h.raw;
@@ -1763,16 +1751,17 @@ async function openHunkDiff(change, staged) {
           const r = await api.git[action]({ cwd: S.root, patch });
           if (r && r.ok) { toast((staged ? 'Unstaged' : 'Staged') + ' hunk in ' + PB.basename(change.path), 'success', 1500); }
           else { toast(r && r.text ? r.text : 'Hunk action failed', 'error'); }
-          overlay.remove();
           await refreshGit();
         } catch (err) { toast(err.message, 'error'); }
       };
       card.appendChild(btn);
-      list.appendChild(card);
+      body.appendChild(card);
     }
-    overlay.appendChild(list);
-    overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
-    host.appendChild(overlay);
+    await showModal({
+      title: 'Hunks · ' + PB.basename(change.path) + (staged ? ' (staged)' : ''),
+      body,
+      actions: [{ label: 'Close', value: null }]
+    });
   } catch (err) { toast(err.message, 'error'); }
 }
 
