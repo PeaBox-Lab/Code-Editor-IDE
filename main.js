@@ -1282,6 +1282,132 @@ ipcMain.handle('lsp:list', async () => {
   return { servers };
 });
 
+ipcMain.handle('lsp:definition', async (_, payload) => {
+  const id = String((payload && payload.id) || '');
+  const uri = String((payload && payload.uri) || '');
+  const pos = payload && payload.position;
+  if (!uri || !pos) return { ok: false, error: 'URI and position required.' };
+  const server = lspServers.get(id);
+  if (!server) return { ok: false, error: 'No LSP server running with id: ' + id };
+  try {
+    const result = await server.client.request('textDocument/definition', { textDocument: { uri }, position: pos });
+    return { ok: true, id, result };
+  } catch (err) {
+    return { ok: false, id, error: err && err.message ? err.message : String(err) };
+  }
+});
+
+ipcMain.handle('lsp:references', async (_, payload) => {
+  const id = String((payload && payload.id) || '');
+  const uri = String((payload && payload.uri) || '');
+  const pos = payload && payload.position;
+  if (!uri || !pos) return { ok: false, error: 'URI and position required.' };
+  const server = lspServers.get(id);
+  if (!server) return { ok: false, error: 'No LSP server running with id: ' + id };
+  try {
+    const result = await server.client.request('textDocument/references', { textDocument: { uri }, position: pos, context: { includeDeclaration: true } });
+    return { ok: true, id, result };
+  } catch (err) {
+    return { ok: false, id, error: err && err.message ? err.message : String(err) };
+  }
+});
+
+ipcMain.handle('lsp:rename', async (_, payload) => {
+  const id = String((payload && payload.id) || '');
+  const uri = String((payload && payload.uri) || '');
+  const pos = payload && payload.position;
+  const newName = String((payload && payload.newName) || '');
+  if (!uri || !pos || !newName) return { ok: false, error: 'URI, position and new name required.' };
+  const server = lspServers.get(id);
+  if (!server) return { ok: false, error: 'No LSP server running with id: ' + id };
+  try {
+    const result = await server.client.request('textDocument/rename', { textDocument: { uri }, position: pos, newName });
+    return { ok: true, id, result };
+  } catch (err) {
+    return { ok: false, id, error: err && err.message ? err.message : String(err) };
+  }
+});
+
+ipcMain.handle('lsp:typeDefinition', async (_, payload) => {
+  const id = String((payload && payload.id) || '');
+  const uri = String((payload && payload.uri) || '');
+  const pos = payload && payload.position;
+  if (!uri || !pos) return { ok: false, error: 'URI and position required.' };
+  const server = lspServers.get(id);
+  if (!server) return { ok: false, error: 'No LSP server running with id: ' + id };
+  try {
+    const result = await server.client.request('textDocument/typeDefinition', { textDocument: { uri }, position: pos });
+    return { ok: true, id, result };
+  } catch (err) {
+    return { ok: false, id, error: err && err.message ? err.message : String(err) };
+  }
+});
+
+ipcMain.handle('lsp:implementation', async (_, payload) => {
+  const id = String((payload && payload.id) || '');
+  const uri = String((payload && payload.uri) || '');
+  const pos = payload && payload.position;
+  if (!uri || !pos) return { ok: false, error: 'URI and position required.' };
+  const server = lspServers.get(id);
+  if (!server) return { ok: false, error: 'No LSP server running with id: ' + id };
+  try {
+    const result = await server.client.request('textDocument/implementation', { textDocument: { uri }, position: pos });
+    return { ok: true, id, result };
+  } catch (err) {
+    return { ok: false, id, error: err && err.message ? err.message : String(err) };
+  }
+});
+
+ipcMain.handle('lsp:peekDefinition', async (_, payload) => {
+  const id = String((payload && payload.id) || '');
+  const uri = String((payload && payload.uri) || '');
+  const pos = payload && payload.position;
+  if (!uri || !pos) return { ok: false, error: 'URI and position required.' };
+  const server = lspServers.get(id);
+  if (!server) return { ok: false, error: 'No LSP server running with id: ' + id };
+  try {
+    const res = await server.client.request('textDocument/definition', { textDocument: { uri }, position: pos });
+    if (!res || !res.result || !res.result.length) return { ok: true, id, result: null };
+    const loc = Array.isArray(res.result) ? res.result[0] : res.result;
+    const targetUri = String(loc && loc.uri || '');
+    const targetRange = loc && loc.range;
+    if (!targetUri || !targetRange) return { ok: true, id, result: null };
+    return { ok: true, id, result: { uri: targetUri, start: (targetRange.start && targetRange.start.line) || 0, end: (targetRange.end && targetRange.end.line) || 0 } };
+  } catch (err) {
+    return { ok: false, id, error: err && err.message ? err.message : String(err) };
+  }
+});
+
+ipcMain.handle('lsp:peekReferences', async (_, payload) => {
+  const id = String((payload && payload.id) || '');
+  const uri = String((payload && payload.uri) || '');
+  const pos = payload && payload.position;
+  if (!uri || !pos) return { ok: false, error: 'URI and position required.' };
+  const server = lspServers.get(id);
+  if (!server) return { ok: false, error: 'No LSP server running with id: ' + id };
+  try {
+    const res = await server.client.request('textDocument/references', { textDocument: { uri }, position: pos, context: { includeDeclaration: true } });
+    if (!res || !res.result || !Array.isArray(res.result)) return { ok: true, id, result: [] };
+    const out = [];
+    for (const loc of res.result) {
+      try {
+        const targetText = readTextFile(decodeUri(loc.uri), 50 * 1024 * 1024);
+        if (!targetText) continue;
+        const line = String((loc.range && loc.range.start && (loc.range.start.line + 1)) || 0);
+        const eol = targetText.content.match(/\r?\n/) ? targetText.content.match(/\r?\n/)[0].length : 0;
+        const offset = Math.min(((loc.range && loc.range.start && loc.range.start.character) || 0) + (targetText.bom ? (targetText.bom.length || 0) : 0), targetText.content.length);
+        const prefix = targetText.content.slice(0, offset);
+        const linePrefix = prefix.split(/\r?\n/).pop() || '';
+        const sub = (loc.uri + ':' + line + ':') + (linePrefix.trim() || linePrefix).slice(0, 200);
+        out.push({ uri: loc.uri, line: String((loc.range && loc.range.start && (loc.range.start.line + 1)) || 0), snippet: sub });
+      } catch { /* skip unreadable file */ }
+    }
+    return { ok: true, id, result: out };
+  } catch (err) {
+    return { ok: false, id, error: err && err.message ? err.message : String(err) };
+  }
+});
+
 ipcMain.on('lsp:diagnostics', (_, payload) => {
   send('lsp:diagnostics', payload);
 });

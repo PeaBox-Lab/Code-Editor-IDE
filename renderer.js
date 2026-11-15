@@ -2063,6 +2063,135 @@ async function wireLspToEditor() {
   } catch (err) { toast(err.message, 'error'); }
 }
 
+/* ---------------- LSP navigation commands ---------------- */
+
+async function activeLspServer() {
+  const entry = currentEntry();
+  if (!entry || entry.virtual) return null;
+  try {
+    const res = await api.lsp.list();
+    const servers = (res && res.servers) || [];
+    return servers.find((s) => s.alive) || null;
+  } catch { return null; }
+}
+
+function currentLspParams(model) {
+  const entry = currentEntry();
+  const pos = S.editor.getPosition();
+  return {
+    entry,
+    uri: model.uri.toString(),
+    position: { line: Math.max(0, pos.lineNumber - 1), character: Math.max(0, pos.column - 1) }
+  };
+}
+
+function openLspLocation(loc) {
+  if (!loc) return;
+  const uri = String(loc.uri || '');
+  if (!uri.startsWith('file://')) return;
+  const filePath = decodeURIComponent(uri.replace(/^file:\/\//, '').replace(/^\/([A-Za-z]:)/, '$1'));
+  const line = ((loc.range && loc.range.start && loc.range.start.line) || 0) + 1;
+  const col = ((loc.range && loc.range.start && loc.range.start.character) || 0) + 1;
+  openFile(filePath, line, col);
+}
+
+async function goToDefinition() {
+  const entry = currentEntry();
+  if (!entry || !S.editor || !S.editor.getModel()) { toast('Open a file first.', 'warn'); return; }
+  const server = await activeLspServer();
+  if (!server) { toast('No running language server. Start one from the palette.', 'warn', 3000); return; }
+  const model = S.editor.getModel();
+  const params = currentLspParams(model);
+  try {
+    const res = await api.lsp.definition({ id: server.id, uri: params.uri, position: params.position });
+    if (!res || !res.ok) { toast((res && res.error) || 'Definition lookup failed.', 'error', 3500); return; }
+    const result = res.result;
+    if (!result) { toast('No definition found.', 'info', 1800); return; }
+    const loc = Array.isArray(result) ? result[0] : result;
+    openLspLocation(loc);
+  } catch (err) { toast(err.message, 'error'); }
+}
+
+async function findLspReferences() {
+  const entry = currentEntry();
+  if (!entry || !S.editor || !S.editor.getModel()) { toast('Open a file first.', 'warn'); return; }
+  const server = await activeLspServer();
+  if (!server) { toast('No running language server. Start one from the palette.', 'warn', 3000); return; }
+  const model = S.editor.getModel();
+  const params = currentLspParams(model);
+  try {
+    const res = await api.lsp.references({ id: server.id, uri: params.uri, position: params.position });
+    if (!res || !res.ok) { toast((res && res.error) || 'References lookup failed.', 'error', 3500); return; }
+    const refs = res.result || [];
+    if (!refs.length) { toast('No references found.', 'info', 1800); return; }
+    // Show references in the output panel with clickable lines.
+    showPanel('outputPane');
+    $('output').textContent = 'References (' + refs.length + '):\n\n';
+    for (const loc of refs) {
+      $('output').textContent += String(loc.snippet || (loc.uri + ':' + loc.line)) + '\n';
+    }
+    toast(refs.length + ' reference(s) found (see Output panel).', 'info', 3000);
+  } catch (err) { toast(err.message, 'error'); }
+}
+
+async function renameSymbolLsp() {
+  const entry = currentEntry();
+  if (!entry || !S.editor || !S.editor.getModel()) { toast('Open a file first.', 'warn'); return; }
+  const server = await activeLspServer();
+  if (!server) { toast('No running language server. Start one from the palette.', 'warn', 3000); return; }
+  const model = S.editor.getModel();
+  const params = currentLspParams(model);
+  // Derive the current word as the default name.
+  const pos = S.editor.getPosition();
+  const wordAtPos = model.getWordAtPosition(pos);
+  const defaultName = wordAtPos ? wordAtPos.word : '';
+  const body = el('div');
+  body.appendChild(el('p', null, 'Rename the symbol under the cursor. Changes will be applied across the project.'));
+  const input = el('input', null, defaultName);
+  input.placeholder = 'New name';
+  input.style.cssText = 'width: 100%; padding: 8px; border: 1px solid var(--border); border-radius: 5px; background: var(--bg-2); color: var(--fg); margin-top: 8px;';
+  body.appendChild(input);
+  const result = await showModal({
+    title: 'Rename Symbol',
+    body,
+    actions: [{ label: 'Cancel', value: null }, { label: 'Rename', value: 'ok', class: 'primary' }]
+  });
+  if (result !== 'ok') return;
+  const newName = input.value.trim();
+  if (!newName) { toast('Enter a new name.', 'warn'); return; }
+  try {
+    const res = await api.lsp.rename({ id: server.id, uri: params.uri, position: params.position, newName });
+    if (!res || !res.ok) { toast((res && res.error) || 'Rename failed.', 'error', 4000); return; }
+    const edits = res.result;
+    if (!edits || !edits.changes) { toast('No edits returned by the language server.', 'info', 2500); return; }
+    // Apply changes to open models.
+    let count = 0;
+    for (const [rawUri, changes] of Object.entries(edits.changes)) {
+      const filePath = decodeURIComponent(rawUri.replace(/^file:\/\//, '').replace(/^\/([A-Za-z]:)/, '$1'));
+      const openEntry = S.models.get(filePath);
+      if (openEntry && openEntry.model) {
+        // Sort edits descending by position to keep offsets stable.
+        const sorted = changes.slice().sort((a, b) => {
+          if (b.range.start.line !== a.range.start.line) return b.range.start.line - a.range.start.line;
+          return b.range.start.character - a.range.start.character;
+        });
+        openEntry.model.pushStackElement();
+        for (const edit of sorted) {
+          const range = new monaco.Range(edit.range.start.line + 1, edit.range.start.character + 1, edit.range.end.line + 1, edit.range.end.character + 1);
+          openEntry.model.pushEditOperations([], [{ range, text: edit.newText }], () => null);
+          count++;
+        }
+        openEntry.model.pushStackElement();
+      }
+    }
+    if (count) {
+      toast('Renamed via language server (' + count + ' edit(s) applied).', 'success', 2500);
+    } else {
+      toast('Rename edits returned, but no matching open buffers (open the files first).', 'info', 4000);
+    }
+  } catch (err) { toast(err.message, 'error'); }
+}
+
 /* ---------------- AI: inline completions + chat ---------------- */
 
 let aiInlineWired = new Set();
@@ -3032,6 +3161,9 @@ function commandList() {
     { id: 'editor.replace', label: 'Editor: Replace', key: 'Ctrl+H', run: () => editorAction('editor.action.startFindReplaceAction') },
     { id: 'editor.gotoLine', label: 'Editor: Go to Line…', key: 'Ctrl+G', run: () => editorAction('editor.action.gotoLine') },
     { id: 'editor.format', label: 'Editor: Format Document', key: 'Shift+Alt+F', run: () => editorAction('editor.action.formatDocument') },
+    { id: 'editor.goToDefinition', label: 'Editor: Go to Definition', key: 'F12', run: () => goToDefinition() },
+    { id: 'editor.findReferences', label: 'Editor: Find All References', key: 'Shift+F12', run: () => findLspReferences() },
+    { id: 'editor.renameSymbol', label: 'Editor: Rename Symbol', key: 'F2', run: () => renameSymbolLsp() },
     { id: 'editor.foldAll', label: 'Editor: Fold All', run: () => editorAction('editor.action.foldAll') },
     { id: 'editor.unfoldAll', label: 'Editor: Unfold All', run: () => editorAction('editor.action.unfoldAll') },
     { id: 'editor.toggleFolds', label: 'Editor: Toggle All Folds', run: () => editorAction('editor.action.toggleAllFolding') },
@@ -3843,7 +3975,10 @@ function handleMenuCommand(payload) {
     'editor.moveLineUp': () => editorAction('editor.action.moveLinesUpAction'),
     'editor.jumpToBracket': () => editorAction('editor.action.jumpToBracket'),
     'editor.insertLineBefore': () => editorAction('editor.action.insertLineBefore'),
-    'editor.insertLineAfter': () => editorAction('editor.action.insertLineAfter')
+    'editor.insertLineAfter': () => editorAction('editor.action.insertLineAfter'),
+    'editor.goToDefinition': () => goToDefinition(),
+    'editor.findReferences': () => findLspReferences(),
+    'editor.renameSymbol': () => renameSymbolLsp()
   };
   const fn = map[id];
   if (fn) fn();
@@ -3913,6 +4048,8 @@ function onKeyDown(event) {
   if (event.altKey && event.shiftKey && key === 'ArrowUp') { event.preventDefault(); editorAction('editor.action.copyLinesUpAction'); return; }
   if (event.altKey && key === 'ArrowDown') { event.preventDefault(); editorAction('editor.action.moveLinesDownAction'); return; }
   if (event.altKey && key === 'ArrowUp') { event.preventDefault(); editorAction('editor.action.moveLinesUpAction'); return; }
+  if (key === 'F12') { event.preventDefault(); if (event.shiftKey) findLspReferences(); else goToDefinition(); return; }
+  if (key === 'F2') { event.preventDefault(); renameSymbolLsp(); return; }
   if (key === 'F5') { event.preventDefault(); if (event.shiftKey) stopRun(); else runCurrent(); return; }
 }
 

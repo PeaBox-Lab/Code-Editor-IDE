@@ -101,7 +101,14 @@ contextBridge.exposeInMainWorld('api', {
     request: (payload) => invoke('lsp:request', payload),
     notify: (payload) => invoke('lsp:notify', payload),
     list: () => invoke('lsp:list'),
-    diagnostics: (payload) => send('lsp:diagnostics', payload)
+    diagnostics: (payload) => send('lsp:diagnostics', payload),
+    definition: (payload) => invoke('lsp:definition', payload),
+    references: (payload) => invoke('lsp:references', payload),
+    rename: (payload) => invoke('lsp:rename', payload),
+    typeDefinition: (payload) => invoke('lsp:typeDefinition', payload),
+    implementation: (payload) => invoke('lsp:implementation', payload),
+    peekDefinition: (payload) => invoke('lsp:peekDefinition', payload),
+    peekReferences: (payload) => invoke('lsp:peekReferences', payload)
   },
 
   ai: {
