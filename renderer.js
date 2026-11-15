@@ -2298,6 +2298,222 @@ async function openAiSettings() {
   toast('AI settings saved', 'success', 1600);
 }
 
+/* ---------------- AI: file creation & scaffolding ---------------- */
+
+let aiPendingConfirm = null;   // one-shot safety confirmation state
+
+async function aiEnsureDir(baseDir, relPath) {
+  // Create nested folders one segment at a time; tolerate "already exists".
+  const normalized = String(relPath).replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
+  const parts = normalized.split('/').filter(Boolean);
+  let current = baseDir;
+  for (const seg of parts) {
+    try { await api.ai.createFolder({ dir: current, name: seg }); } catch (err) { /* ignore if exists */ }
+    current = current.replace(/[\\/]+$/, '') + '/' + seg;
+  }
+  return current;
+}
+
+async function aiConfirmCreate(files) {
+  // Safety: confirm once per operation, listing every file to be written.
+  const body = el('div');
+  body.appendChild(el('p', null, 'The AI wants to create or write the following file(s):'));
+  const list = el('div');
+  for (const f of files) {
+    const row = el('div');
+    row.style.cssText = 'margin: 6px 0; padding: 6px; border: 1px solid var(--border); border-radius: 5px; font-size: 12px;';
+    row.innerHTML = '<strong>' + PB.escapeHtml(f.path || f.name) + '</strong> ' +
+      (f.size !== undefined ? '(' + f.size + ' bytes)' : '') +
+      '<div style="margin-top:4px; white-space: pre-wrap; font-family: monospace; font-size: 11px; color: var(--muted); overflow: auto; max-height: 120px;">' +
+      PB.escapeHtml((f.preview || f.content || '').slice(0, 2000)) + '</div>';
+    list.appendChild(row);
+  }
+  body.appendChild(list);
+  body.appendChild(el('p', 'modal-note', 'Confirm once to create all files listed above. No further prompts for this operation.'));
+  const result = await showModal({
+    title: 'AI: Confirm File Creation',
+    body,
+    actions: [
+      { label: 'Cancel', value: null },
+      { label: 'Create Files', value: 'ok', class: 'primary' }
+    ]
+  });
+  return result === 'ok';
+}
+
+async function openAiFileCreator() {
+  const s = settings();
+  if (!s.ai.enabled) { toast('Enable AI in Settings first.', 'warn'); return; }
+  const provider = s.ai.provider;
+  if (!provider || !hasAiKey(provider)) { toast('No API key set for ' + provider + '.', 'warn'); return; }
+  if (!S.root) { toast('Open a folder/workspace first.', 'warn'); return; }
+
+  const body = el('div');
+  body.style.cssText = 'display: flex; flex-direction: column; gap: 8px; width: 560px;';
+
+  body.appendChild(el('label', null, 'Target folder'));
+  const dirInput = el('input', null, S.root);
+  dirInput.readOnly = true;
+  body.appendChild(dirInput);
+
+  body.appendChild(el('label', null, 'File name (relative to target folder)'));
+  const nameInput = el('input', null, '');
+  nameInput.placeholder = 'e.g. src/utils.js';
+  body.appendChild(nameInput);
+
+  body.appendChild(el('label', null, 'What should the AI create?'));
+  const prompt = el('textarea', null, '');
+  prompt.placeholder = 'Describe the file you want the AI to generate…';
+  prompt.rows = 6;
+  prompt.spellcheck = false;
+  body.appendChild(prompt);
+
+  const result = await showModal({
+    title: 'AI: Create File',
+    body,
+    actions: [{ label: 'Cancel', value: null }, { label: 'Generate', value: 'go', class: 'primary' }]
+  });
+  if (result !== 'go') return;
+
+  const nm = nameInput.value.trim();
+  if (!nm) { toast('Enter a file name.', 'warn'); return; }
+  const desc = prompt.value.trim();
+  if (!desc) { toast('Enter a description.', 'warn'); return; }
+
+  const rel = nm.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
+  let content = '';
+  try {
+    toast('Generating file with AI…', 'info', 1200);
+    const res = await api.ai.codegen({ provider: provider, filePath: rel, description: desc });
+    content = (res && res.text) || '';
+    if (!content) { toast('AI returned no content.', 'warn'); return; }
+  } catch (err) { toast(err.message, 'error'); return; }
+
+  const plan = [{ name: rel, path: rel, content, preview: content }];
+  if (!(await aiConfirmCreate(plan))) { toast('AI action cancelled.', 'info', 1200); return; }
+  try {
+    const slash = rel.lastIndexOf('/');
+    const relDir = slash >= 0 ? rel.slice(0, slash) : '';
+    const fileName = slash >= 0 ? rel.slice(slash + 1) : rel;
+    const targetDir = relDir ? await aiEnsureDir(S.root, relDir) : S.root;
+    await api.ai.createFile({ dir: targetDir, name: fileName, content });
+    toast('File created: ' + rel, 'success', 1600);
+    await refreshExplorer();
+  } catch (err) { toast(err.message, 'error'); }
+}
+
+async function openAiProjectScaffold() {
+  const s = settings();
+  if (!s.ai.enabled) { toast('Enable AI in Settings first.', 'warn'); return; }
+  const provider = s.ai.provider;
+  if (!provider || !hasAiKey(provider)) { toast('No API key set for ' + provider + '.', 'warn'); return; }
+  if (!S.root) { toast('Open a folder/workspace first.', 'warn'); return; }
+
+  const body = el('div');
+  body.style.cssText = 'display: flex; flex-direction: column; gap: 8px; width: 600px;';
+
+  const promptLabel = el('label', null, 'Describe the project to scaffold');
+  const prompt = el('textarea', null, '');
+  prompt.placeholder = 'e.g. A Node.js Express API with routes, controllers, models, and tests';
+  prompt.rows = 6;
+  prompt.spellcheck = false;
+  body.appendChild(promptLabel, prompt);
+
+  const result = await showModal({
+    title: 'AI: Scaffold Project',
+    body,
+    actions: [{ label: 'Cancel', value: null }, { label: 'Generate Plan', value: 'go', class: 'primary' }]
+  });
+  if (result !== 'go') return;
+
+  const desc = prompt.value.trim();
+  if (!desc) { toast('Enter a description.', 'warn'); return; }
+
+  let files = [];
+  try {
+    toast('Planning project structure…', 'info', 1200);
+    const res = await api.ai.scaffold({ provider: provider, description: desc });
+    let parsed = [];
+    try { parsed = JSON.parse((res && res.text) || '[]'); } catch { /* fall through */ }
+    if (!Array.isArray(parsed) || parsed.length === 0) { toast('Could not parse the AI file plan.', 'warn'); return; }
+    files = parsed;
+  } catch (err) { toast(err.message, 'error'); return; }
+
+  const plan = files.map((f) => ({ name: String(f.path || ''), path: String(f.path || ''), content: String(f.content || ''), preview: String(f.content || '') }));
+  if (!(await aiConfirmCreate(plan))) { toast('AI action cancelled.', 'info', 1200); return; }
+
+  try {
+    for (const f of plan) {
+      const normalized = f.name.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
+      const slash = normalized.lastIndexOf('/');
+      const relDir = slash >= 0 ? normalized.slice(0, slash) : '';
+      const fileName = slash >= 0 ? normalized.slice(slash + 1) : normalized;
+      const targetDir = relDir ? await aiEnsureDir(S.root, relDir) : S.root;
+      await api.ai.createFile({ dir: targetDir, name: fileName, content: f.content });
+    }
+    toast('Project scaffolded: ' + plan.length + ' file(s) created.', 'success', 2200);
+    await refreshExplorer();
+  } catch (err) { toast(err.message, 'error'); }
+}
+
+async function applyAiToCurrentFile() {
+  const entry = currentEntry();
+  if (!entry || !S.editor || !S.editor.getModel()) { toast('Open a file first.', 'warn'); return; }
+  const s = settings();
+  if (!s.ai.enabled) { toast('Enable AI in Settings first.', 'warn'); return; }
+  const provider = s.ai.provider;
+  if (!provider || !hasAiKey(provider)) { toast('No API key set for ' + provider + '.', 'warn'); return; }
+
+  const body = el('div');
+  body.style.cssText = 'display: flex; flex-direction: column; gap: 8px; width: 560px;';
+
+  const promptLabel = el('label', null, 'How should the AI modify this file?');
+  const prompt = el('textarea', null, '');
+  prompt.placeholder = 'e.g. Add error handling, refactor this function, add comments…';
+  prompt.rows = 5;
+  prompt.spellcheck = false;
+  body.appendChild(promptLabel, prompt);
+
+  const preview = el('div', null, '');
+  preview.style.cssText = 'margin-top: 6px; padding: 8px; border: 1px solid var(--border); border-radius: 5px; background: var(--bg-2); font-family: monospace; font-size: 11px; color: var(--muted); max-height: 200px; overflow: auto; white-space: pre-wrap;';
+  preview.textContent = 'Modified content appears after generation.';
+  body.appendChild(preview);
+
+  const result = await showModal({
+    title: 'AI: Apply to Current File',
+    body,
+    actions: [{ label: 'Cancel', value: null }, { label: 'Generate', value: 'go', class: 'primary' }]
+  });
+  if (result !== 'go') return;
+
+  const p = prompt.value.trim();
+  if (!p) { toast('Enter instructions.', 'warn'); return; }
+
+  const cur = S.editor.getModel().getValue();
+  let content = '';
+  try {
+    toast('Generating file update…', 'info', 1200);
+    const res = await api.ai.edit({ provider: provider, filePath: entry.name || 'current', instructions: p, content: cur });
+    content = (res && res.text) || '';
+    if (!content) { toast('AI returned no content.', 'warn'); return; }
+  } catch (err) { toast(err.message, 'error'); return; }
+
+  const plan = [{ path: entry.path || entry.name, name: entry.name || 'current', content, preview: content }];
+  if (!(await aiConfirmCreate(plan))) { toast('AI action cancelled.', 'info', 1200); return; }
+
+  try {
+    await api.file.write(plan[0].path, plan[0].content);
+    toast('File updated successfully.', 'success', 1800);
+    await refreshExplorer();
+    // Reload the current buffer so the editor shows the new content.
+    try {
+      if (S.editor && S.editor.getModel()) {
+        S.editor.getModel().setValue(content);
+      }
+    } catch { /* ignore */ }
+  } catch (err) { toast(err.message, 'error'); }
+}
+
 /**
  * Explicitly fetches from origin and refreshes the Git view.
  */
@@ -2771,7 +2987,10 @@ function commandList() {
     { id: 'lsp.wire', label: 'Language Servers: Wire to Current Editor', run: () => wireLspToEditor() },
     { id: 'ai.settings', label: 'AI: Open AI Settings', run: () => openAiSettings() },
     { id: 'ai.chat', label: 'AI: Chat', run: () => openAiChat() },
-    { id: 'ai.complete', label: 'AI: Trigger Inline Completion', run: async () => { await triggerAiCompletion(); } }
+    { id: 'ai.complete', label: 'AI: Trigger Inline Completion', run: async () => { await triggerAiCompletion(); } },
+    { id: 'ai.codegen', label: 'AI: Codegen File', run: async () => { await openAiFileCreator(); } },
+    { id: 'ai.scaffold', label: 'AI: Scaffold Project', run: async () => { await openAiProjectScaffold(); } },
+    { id: 'ai.edit', label: 'AI: Edit Current File', run: async () => { await applyAiToCurrentFile(); } }
   ];
 }
 

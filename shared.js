@@ -1223,6 +1223,37 @@
     return [{ role: 'system', content: sys }, { role: 'user', content: user }];
   }
 
+  /** Build chat messages for AI code generation into a new file. */
+  function aiCodegenMessages(filePath, description, existingContent) {
+    var sys = 'You are PeaBox AI, a code generation engine. Generate complete, working file content ' +
+      'based on the user description. Return ONLY the raw file content, with no markdown fences, ' +
+      'no explanations, and no repetition of existing text unless modifying. Use best-practice code.';
+    var parts = [];
+    if (filePath) parts.push('File: ' + str(filePath));
+    if (existingContent) parts.push('Existing content:\n' + str(existingContent).slice(0, 12000));
+    parts.push('Description: ' + str(description));
+    return [{ role: 'system', content: sys }, { role: 'user', content: parts.join('\n\n') }];
+  }
+
+  /** Build chat messages for AI project scaffolding (returns a JSON file plan). */
+  function aiScaffoldMessages(description) {
+    var sys = 'You are PeaBox AI, a project scaffolding engine. Return ONLY a JSON array of objects ' +
+      'with shape {"path": string, "content": string}. Each path is relative to the project root. ' +
+      'No markdown fences, no prose, no trailing comments. The JSON must parse cleanly.';
+    var user = 'Project description: ' + str(description) +
+      '\n\nCreate a sensible, complete minimal project (folders via paths, starter files, package/config).';
+    return [{ role: 'system', content: sys }, { role: 'user', content: user }];
+  }
+
+  /** Build chat messages for modifying an existing file. */
+  function aiEditMessages(filePath, instructions, currentContent) {
+    var sys = 'You are PeaBox AI, a code editing engine. Apply the user instructions to the file and ' +
+      'return ONLY the full new file content, no markdown fences, no explanation.';
+    var user = 'File: ' + str(filePath) + '\n\nCurrent content:\n' + str(currentContent).slice(0, 14000) +
+      '\n\nInstructions: ' + str(instructions);
+    return [{ role: 'system', content: sys }, { role: 'user', content: user }];
+  }
+
   /** Build an HTTP request descriptor for a chat completion.
    *  @returns {{url:string, headers:Object, body:Object, kind:string}} */
   function buildChatRequest(opts) {

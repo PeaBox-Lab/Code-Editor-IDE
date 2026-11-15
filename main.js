@@ -1409,6 +1409,71 @@ ipcMain.handle('ai:chat', async (_, payload) => {
   return { ok: true, text: res.text };
 });
 
+/* ---------------- IPC: AI file creation ---------------- */
+
+ipcMain.handle('ai:createFile', async (_, payload) => {
+  const dir = assertWorkspaceDir(payload && payload.dir);
+  const check = PB.validateEntryName(payload && payload.name);
+  if (!check.ok) throw new Error(check.error);
+  const full = path.join(dir, check.value);
+  if (fs.existsSync(full)) throw new Error('An item with that name already exists.');
+  const content = typeof (payload && payload.content) === 'string' ? payload.content : '';
+  if (content.length > 50 * 1024 * 1024) throw new Error('File is too large to save.');
+  writeFileAtomic.sync(full, content, { encoding: 'utf8', fsync: true });
+  addAllowed(full);
+  return { path: full, rel: check.value, size: content.length };
+});
+
+ipcMain.handle('ai:createFolder', async (_, payload) => {
+  const dir = assertWorkspaceDir(payload && payload.dir);
+  const check = PB.validateEntryName(payload && payload.name);
+  if (!check.ok) throw new Error(check.error);
+  const full = path.join(dir, check.value);
+  if (fs.existsSync(full)) throw new Error('An item with that name already exists.');
+  await fsp.mkdir(full, { recursive: true });
+  addAllowed(full);
+  return { path: full, rel: check.value };
+});
+
+ipcMain.handle('ai:codegen', async (_, payload) => {
+  const messages = PB.aiCodegenMessages(payload && payload.filePath, payload && payload.description, payload && payload.content);
+  const res = await aiRequest({
+    providerId: payload && payload.provider,
+    model: payload && payload.model,
+    endpoint: payload && payload.endpoint,
+    messages: messages,
+    maxTokens: 4096,
+    temperature: 0.2
+  });
+  return { ok: true, text: res.text };
+});
+
+ipcMain.handle('ai:scaffold', async (_, payload) => {
+  const messages = PB.aiScaffoldMessages(payload && payload.description);
+  const res = await aiRequest({
+    providerId: payload && payload.provider,
+    model: payload && payload.model,
+    endpoint: payload && payload.endpoint,
+    messages: messages,
+    maxTokens: 8192,
+    temperature: 0.3
+  });
+  return { ok: true, text: res.text };
+});
+
+ipcMain.handle('ai:edit', async (_, payload) => {
+  const messages = PB.aiEditMessages(payload && payload.filePath, payload && payload.instructions, payload && payload.content);
+  const res = await aiRequest({
+    providerId: payload && payload.provider,
+    model: payload && payload.model,
+    endpoint: payload && payload.endpoint,
+    messages: messages,
+    maxTokens: 8192,
+    temperature: 0.2
+  });
+  return { ok: true, text: res.text };
+});
+
 /* ---------------- IPC: recovery ---------------- */
 
 ipcMain.handle('recovery:save', (_, payload) => {
