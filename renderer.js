@@ -2258,6 +2258,11 @@ async function openAiSettings() {
           status.textContent = 'Set (' + res.masked + ')';
           status.className = 'ai-key-status';
           input.value = '';
+          // Refresh cached key status so the rest of the app sees the key immediately.
+          try {
+            const updated = await api.ai.keyStatus();
+            if (updated && typeof updated === 'object') S.ai.keyStatus = updated;
+          } catch { /* ignore */ }
           toast('Key saved for ' + prov.label, 'success', 1800);
         } else {
           toast(res.error || 'Failed to save key.', 'error');
@@ -2273,6 +2278,10 @@ async function openAiSettings() {
           status.textContent = 'Not set';
           status.className = 'ai-key-status empty';
           input.value = '';
+          try {
+            const updated = await api.ai.keyStatus();
+            if (updated && typeof updated === 'object') S.ai.keyStatus = updated;
+          } catch { /* ignore */ }
           toast('Key cleared for ' + prov.label, 'info', 1600);
         } else {
           toast(res.error || 'Failed to clear key.', 'error');
