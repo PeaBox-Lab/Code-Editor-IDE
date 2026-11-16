@@ -2897,6 +2897,39 @@ async function wireLspToEditor() {
         }
       });
     }
+    // Wire signature help if supported.
+    if (PB.lspMethodCapable(caps, 'textDocument/signatureHelp')) {
+      monaco.languages.registerSignatureHelpProvider(lang, {
+        provideSignatureHelp: async (model, position) => {
+          const pos = PB.monacoPositionToLSP({ line: position.lineNumber - 1, column: position.column - 1 });
+          const result = await lsp.request({ id: server.id, method: 'textDocument/signatureHelp', params: {
+            textDocument: { uri: model.uri.toString() }, position: pos
+          } });
+          if (!result || !result.ok || !result.result) return null;
+          return PB.toMonacoSignatureHelp(result.result);
+        }
+      });
+    }
+    // Wire code actions if supported.
+    if (PB.lspMethodCapable(caps, 'textDocument/codeAction')) {
+      monaco.languages.registerCodeActionProvider(lang, {
+        provideCodeActions: async (model, range) => {
+          const pos = PB.monacoPositionToLSP({ line: range.start.lineNumber - 1, column: range.start.column - 1 });
+          const endPos = PB.monacoPositionToLSP({ line: range.end.lineNumber - 1, column: range.end.column - 1 });
+          const result = await lsp.request({ id: server.id, method: 'textDocument/codeAction', params: {
+            textDocument: { uri: model.uri.toString() },
+            range: { start: pos, end: endPos },
+            context: { diagnostics: [] }
+          } });
+          if (!result || !result.ok || !result.result) return { actions: [] };
+          return { actions: (result.result || []).map((a) => ({
+            title: a.title,
+            kind: a.kind,
+            edit: a.edit ? { edits: [] } : undefined
+          })) };
+        }
+      });
+    }
     toast('Wired LSP (' + server.id + ') for ' + lang + '.', 'success', 2500);
   } catch (err) { toast(err.message, 'error'); }
 }

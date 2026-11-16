@@ -1244,6 +1244,17 @@ env: 'development',
     return { contents: hover.contents, range: hover.range };
   }
 
+  function toMonacoSignatureHelp(help) {
+    if (!help) return null;
+    return {
+      signatures: (help.signatures || []).map(function (s) {
+        return { label: s.label, documentation: s.documentation, parameters: (s.parameters || []).map(function (p) { return { label: p.label, documentation: p.documentation }; }) };
+      }),
+      activeSignature: help.activeSignature || 0,
+      activeParameter: help.activeParameter || 0
+    };
+  }
+
   /** Map an LSP Location to Monaco's {uri, range}. */
   function toMonacoLocation(loc) {
     if (!loc) return null;
@@ -1579,6 +1590,7 @@ env: 'development',
     lspPositionToMonaco: lspPositionToMonaco,
     monacoPositionToLSP: monacoPositionToLSP,
     toMonacoHover: toMonacoHover,
+    toMonacoSignatureHelp: toMonacoSignatureHelp,
     toMonacoLocation: toMonacoLocation,
     createLspClient: createLspClient,
     createDapClient: createDapClient,
