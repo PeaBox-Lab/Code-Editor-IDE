@@ -1323,6 +1323,87 @@ ipcMain.handle('lsp:list', async () => {
   return { servers };
 });
 
+/* ---------------- IPC: debug adapter protocol (DAP) ---------------- */
+
+const dapSessions = new Map();
+let dapSeq = 0;
+
+function startDapSession(payload) {
+  const id = String((payload && payload.id) || ('dap-' + ++dapSeq));
+  const command = String((payload && payload.command) || '').trim();
+  const args = Array.isArray(payload && payload.args) ? payload.args.map((x) => String(x)) : [];
+  if (!command) return { ok: false, error: 'Debug adapter command is required.' };
+  if (dapSessions.get(id)) return { ok: true, id, alreadyRunning: true };
+
+  const cwd = payload && payload.cwd ? registeredRoot(payload.cwd) : app.getPath('home');
+  const child = spawn(command, args, { cwd, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
+  const session = { id, command, args, cwd, alive: true, child, client: null };
+  const client = PB.createDapClient({ write: (s) => { try { child.stdin.write(s); } catch { /* ignore */ } } });
+  session.client = client;
+  dapSessions.set(id, session);
+
+  child.stdout.on('data', (data) => client.onData(String(data)));
+  child.stderr.on('data', (data) => {
+    const text = String(data);
+    if (text.trim()) send('dap:event', { id, event: 'adapterError', body: { text } });
+  });
+  child.on('exit', (code) => {
+    session.alive = false;
+    dapSessions.delete(id);
+    send('dap:event', { id, event: 'adapterExit', body: { code } });
+  });
+  client.onEvent((evt) => send('dap:event', { id, event: evt.event, body: evt.body }));
+
+  return { ok: true, id, command, args, cwd };
+}
+
+ipcMain.handle('dap:start', async (_, payload) => {
+  const res = startDapSession(payload);
+  if (!res.ok) return res;
+  const id = res.id;
+  await new Promise((resolve) => {
+    let settled = false;
+    const check = () => { if (!dapSessions.get(id)) { if (!settled) { settled = true; resolve(true); } } };
+    const iv = setInterval(check, 200);
+    setTimeout(() => { clearInterval(iv); if (!settled) { settled = true; resolve(false); } }, 3000);
+    setImmediate(check);
+  });
+  const session = dapSessions.get(id);
+  if (!session || !session.alive) return { ok: false, id, error: 'Debug adapter exited during startup.' };
+  return { ok: true, id, command: session.command, args: session.args, cwd: String(session.cwd) };
+});
+
+ipcMain.handle('dap:stop', async (_, payload) => {
+  const id = String((payload && payload.id) || '');
+  const session = dapSessions.get(id);
+  if (!session) return { ok: false, error: 'No debug session with id: ' + id };
+  try { await session.client.request('disconnect', { terminateDebuggee: true }); } catch { /* may already be gone */ }
+  dapSessions.delete(id);
+  try { session.child.kill(); } catch { /* ignore */ }
+  setTimeout(() => { try { session.child.kill('SIGKILL'); } catch { /* ignore */ } }, 1500);
+  send('dap:event', { id, event: 'terminated', body: {} });
+  return { ok: true, id };
+});
+
+ipcMain.handle('dap:request', async (_, payload) => {
+  const id = String((payload && payload.id) || '');
+  const method = String((payload && payload.method) || '');
+  if (!method) return { ok: false, error: 'DAP command required.' };
+  const session = dapSessions.get(id);
+  if (!session) return { ok: false, error: 'No debug session running with id: ' + id };
+  try {
+    const result = await session.client.request(method, payload && payload.params);
+    return { ok: true, id, method, result };
+  } catch (err) {
+    return { ok: false, id, method, error: err && err.message ? err.message : String(err) };
+  }
+});
+
+ipcMain.handle('dap:list', async () => {
+  const sessions = Array.from(dapSessions.entries()).map(([id, s]) => ({ id, command: s.command, args: s.args, alive: s.alive }));
+  return { sessions };
+});
+
 ipcMain.handle('lsp:definition', async (_, payload) => {
   const id = String((payload && payload.id) || '');
   const uri = String((payload && payload.uri) || '');

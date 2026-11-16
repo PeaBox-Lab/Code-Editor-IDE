@@ -213,6 +213,7 @@
             <button class="panel-tab active" data-panel="terminalPane"><svg class="icon"><use href="#i-terminal"></use></svg> TERMINAL</button>
             <button class="panel-tab" data-panel="outputPane"><svg class="icon"><use href="#i-output"></use></svg> OUTPUT</button>
             <button class="panel-tab" data-panel="problemsPane"><svg class="icon"><use href="#i-warning"></use></svg> PROBLEMS</button>
+            <button class="panel-tab" data-panel="debugPane"><svg class="icon"><use href="#i-play"></use></svg> DEBUG</button>
           </div>
           <div class="panel-actions">
             <button id="newTerminal" class="mini-btn" title="New terminal"><svg class="icon"><use href="#i-plus"></use></svg></button>
@@ -234,6 +235,28 @@
         </form>
         <div id="problemsPane" class="panel-pane hidden">
           <div id="problemsList" class="problems-list"></div>
+        </div>
+        <div id="debugPane" class="panel-pane hidden">
+          <div id="debugToolbar" class="debug-toolbar">
+            <button id="debugContinue" class="mini-btn" title="Continue (F5)">▶</button>
+            <button id="debugPause" class="mini-btn" title="Pause">⏸</button>
+            <button id="debugStepOver" class="mini-btn" title="Step Over (F10)">⤵</button>
+            <button id="debugStepIn" class="mini-btn" title="Step In (F11)">⬇</button>
+            <button id="debugStepOut" class="mini-btn" title="Step Out (Shift+F11)">⬆</button>
+            <button id="debugStop" class="mini-btn" title="Stop Debugging (Shift+F5)"><svg class="icon"><use href="#i-stop"></use></svg></button>
+            <span id="debugState" class="muted small"></span>
+          </div>
+          <div id="debugLog" class="debug-log muted small"></div>
+          <div class="debug-columns">
+            <div class="debug-col">
+              <div class="debug-section-title">CALL STACK</div>
+              <div id="debugStack" class="debug-list"></div>
+            </div>
+            <div class="debug-col">
+              <div class="debug-section-title">VARIABLES</div>
+              <div id="debugVariables" class="debug-list"></div>
+            </div>
+          </div>
         </div>
       </section>
 

@@ -113,6 +113,13 @@ contextBridge.exposeInMainWorld('api', {
     peekReferences: (payload) => invoke('lsp:peekReferences', payload)
   },
 
+  dap: {
+    start: (payload) => invoke('dap:start', payload),
+    stop: (payload) => invoke('dap:stop', payload),
+    request: (payload) => invoke('dap:request', payload),
+    list: () => invoke('dap:list')
+  },
+
   ai: {
     providers: () => invoke('ai:providers'),
     keyStatus: () => invoke('ai:keyStatus'),
@@ -148,6 +155,7 @@ contextBridge.exposeInMainWorld('api', {
     terminalData: (cb) => subscribe('terminal:data', cb),
     terminalExit: (cb) => subscribe('terminal:exit', cb),
     lspDiagnostics: (cb) => subscribe('lsp:diagnostics', cb),
+    dapEvent: (cb) => subscribe('dap:event', cb),
     closeRequest: (cb) => subscribe('app:close-request', cb)
   }
 });

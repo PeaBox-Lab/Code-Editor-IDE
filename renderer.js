@@ -50,6 +50,8 @@ const S = {
   navNavigating: false,
   recentlyClosed: [],
   blameCache: new Map(),
+  breakpoints: new Map(),
+  debug: null,
   compare: null,
   diffEditor: null,
   dragKey: null,
@@ -575,6 +577,15 @@ function initMonaco() {
       }
     });
     S.editor.onDidChangeModel(() => updateEol());
+    // Clicking the glyph margin toggles a breakpoint at that line.
+    S.editor.onMouseDown((event) => {
+      const type = event && event.target && event.target.type;
+      const GLYPH_MARGIN = (monaco.editor.MouseTargetType && monaco.editor.MouseTargetType.GUTTER_GLYPH_MARGIN) || 4;
+      if (type !== GLYPH_MARGIN) return;
+      const entry = currentEntry();
+      if (!entry || !event.target.position) return;
+      toggleBreakpoint(entry.path, event.target.position.lineNumber);
+    });
     monacoReadyResolve();
   });
 }
@@ -648,6 +659,7 @@ async function loadWorkspace(tree, options) {
   S.recentlyClosed = [];
   S.blameCache.clear();
   exitCompare();
+  stopDebugSession(true);
   $('workspace').textContent = S.root;
   $('workspace').title = S.root;
   $('workspaceBtn').title = S.root;
@@ -1201,6 +1213,7 @@ async function openFile(filePath, line, column) {
       };
       S.models.set(filePath, entry);
       bindModel(entry);
+      applyBreakpointDecorations(entry);
       api.file.watchStart(filePath).catch(() => {});
     } catch (err) {
       toast('Could not open ' + nameOf(filePath) + ': ' + err.message, 'error', 6000);
@@ -1900,6 +1913,430 @@ function wireBlameHover(lang) {
       return { contents: lines.map((value) => ({ value })) };
     }
   });
+}
+
+/* ---------------- debugging (DAP) ---------------- */
+
+const DEBUG_PRESETS = [
+  {
+    id: 'python-debugpy',
+    label: 'Python (debugpy adapter)',
+    command: 'python',
+    args: '-m debugpy.adapter',
+    launch: { request: 'launch', program: '${program}', cwd: '${cwd}', console: 'internalConsole', justMyCode: false, stopOnEntry: false }
+  },
+  {
+    id: 'node-js-debug',
+    label: 'Node.js (js-debug adapter — npm i @vscode/js-debug)',
+    command: 'node',
+    args: '${jsDebugPath}/src/debugServerMain.js',
+    launch: { type: 'pwa-node', request: 'launch', name: 'PeaBox Debug', program: '${program}', cwd: '${cwd}', console: 'internalConsole', stopOnEntry: false }
+  },
+  {
+    id: 'custom',
+    label: 'Custom adapter…',
+    command: '',
+    args: '',
+    launch: { request: 'launch', program: '${program}', cwd: '${cwd}', stopOnEntry: false }
+  }
+];
+
+async function startDebugFlow() {
+  if (!S.root) { toast('Open a folder first.', 'warn'); return; }
+  if (S.debug) { toast('A debug session is already running. Stop it first.', 'warn', 3000); return; }
+  const entry = currentEntry();
+  const body = el('div');
+  const presetLabel = el('label', 'modal-note', 'Adapter');
+  const presetSelect = el('select', 'modal-input');
+  for (const preset of DEBUG_PRESETS) {
+    const opt = el('option', null, preset.label);
+    opt.value = preset.id;
+    presetSelect.appendChild(opt);
+  }
+  const programLabel = el('label', 'modal-note', 'Program to debug');
+  const programInput = el('input', 'modal-input');
+  programInput.type = 'text';
+  programInput.spellcheck = false;
+  if (entry && entry.path) programInput.value = entry.path;
+  const cmdLabel = el('label', 'modal-note', 'Adapter command');
+  const cmdInput = el('input', 'modal-input');
+  cmdInput.type = 'text';
+  cmdInput.value = DEBUG_PRESETS[0].command;
+  const argsLabel = el('label', 'modal-note', 'Adapter arguments (comma separated)');
+  const argsInput = el('input', 'modal-input');
+  argsInput.type = 'text';
+  argsInput.value = DEBUG_PRESETS[0].args;
+  const launchLabel = el('label', 'modal-note', 'Launch configuration (JSON)');
+  const launchInput = el('textarea', 'modal-input');
+  launchInput.rows = 6;
+  launchInput.spellcheck = false;
+  const syncPreset = () => {
+    const preset = DEBUG_PRESETS.find((p) => p.id === presetSelect.value) || DEBUG_PRESETS[0];
+    cmdInput.value = preset.command;
+    argsInput.value = preset.args;
+    const launch = Object.assign({}, preset.launch, { program: programInput.value || '', cwd: S.root });
+    launchInput.value = JSON.stringify(launch, null, 2);
+  };
+  presetSelect.onchange = syncPreset;
+  programInput.addEventListener('change', syncPreset);
+  syncPreset();
+  body.append(presetLabel, presetSelect, programLabel, programInput, cmdLabel, cmdInput, argsLabel, argsInput, launchLabel, launchInput);
+
+  const answer = await showModal({
+    title: 'Start Debugging',
+    body,
+    actions: [{ label: 'Cancel', value: null }, { label: 'Start', value: 'start', class: 'primary' }]
+  });
+  if (answer !== 'start') return;
+  let launch;
+  try { launch = JSON.parse(launchInput.value || '{}'); }
+  catch (err) { toast('Launch configuration is not valid JSON: ' + err.message, 'error', 6000); return; }
+  const command = cmdInput.value.trim();
+  if (!command) { toast('Adapter command is required.', 'warn'); return; }
+  const args = argsInput.value.split(',').map((x) => x.trim()).filter(Boolean);
+  await startDebugSession({ command, args, launch, adapterId: presetSelect.value });
+}
+
+async function startDebugSession(config) {
+  debugLogClear();
+  debugLog('Starting adapter: ' + config.command + ' ' + (config.args || []).join(' '));
+  let res;
+  try { res = await api.dap.start({ id: 'peabox-debug', command: config.command, args: config.args, cwd: S.root }); }
+  catch (err) { toast('Could not start adapter: ' + err.message, 'error', 6000); return false; }
+  if (!res || !res.ok) { toast((res && res.error) || 'Adapter failed to start.', 'error', 6000); return false; }
+
+  const session = {
+    id: res.id,
+    threadId: null,
+    frames: [],
+    stoppedLocation: null
+  };
+  S.debug = session;
+  debugState('starting…');
+
+  const initialized = new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('Adapter did not initialize within 10s.')), 10000);
+    debugInitializedResolve = () => { clearTimeout(timer); resolve(); };
+    debugInitializedReject = (err) => { clearTimeout(timer); reject(err); };
+  });
+
+  try {
+    await api.dap.request({ id: session.id, method: 'initialize', params: {
+      adapterID: config.adapterId || 'peabox',
+      pathFormat: 'path',
+      linesStartAt1: true,
+      columnsStartAt1: true,
+      supportsVariableType: true,
+      supportsVariablePaging: false,
+      supportsRunInTerminalRequest: false,
+      locale: 'en'
+    } });
+    sendBreakpointsToAdapter();
+    await initialized;
+    await api.dap.request({ id: session.id, method: 'launch', params: config.launch || {} });
+    await api.dap.request({ id: session.id, method: 'configurationDone', params: {} });
+    debugState('running');
+    debugLog('Session started.');
+    showPanel('debugPane');
+    toast('Debug session started.', 'success', 2200);
+    updateDebugToolbar();
+    return true;
+  } catch (err) {
+    toast('Debug startup failed: ' + err.message, 'error', 7000);
+    debugLog('Startup failed: ' + err.message);
+    await stopDebugSession(true);
+    return false;
+  }
+}
+
+let debugInitializedResolve = null;
+let debugInitializedReject = null;
+
+async function stopDebugSession(silent) {
+  const session = S.debug;
+  clearPausedHighlight();
+  S.debug = null;
+  if (!session) return;
+  try { await api.dap.stop({ id: session.id }); } catch { /* already gone */ }
+  if (!silent) { debugState(''); toast('Debug session ended.', 'info', 1800); }
+  debugState('');
+  updateDebugToolbar();
+}
+
+async function debugCommand(method, params) {
+  const session = S.debug;
+  if (!session) { toast('No debug session running.', 'warn', 2000); return; }
+  try {
+    const res = await api.dap.request({ id: session.id, method, params: params || {} });
+    if (!res || !res.ok) { toast((res && res.error) || (method + ' failed.'), 'error', 4000); }
+  } catch (err) { toast(err.message, 'error', 4000); }
+}
+
+async function debugContinue() { if (S.debug) await debugCommand('continue', { threadId: S.debug.threadId || 0 }); }
+async function debugPause() { if (S.debug) await debugCommand('pause', { threadId: S.debug.threadId || 0 }); }
+async function debugStepOver() { if (S.debug) await debugCommand('next', { threadId: S.debug.threadId || 0 }); }
+async function debugStepIn() { if (S.debug) await debugCommand('stepIn', { threadId: S.debug.threadId || 0 }); }
+async function debugStepOut() { if (S.debug) await debugCommand('stepOut', { threadId: S.debug.threadId || 0 }); }
+
+async function handleDapEvent(evt) {
+  const event = evt && evt.event;
+  const body = evt && evt.body;
+  // Events arrive before S.debug exists for adapterError/adapterExit.
+  if (event === 'adapterError') { debugLog('adapter: ' + ((body && body.text) || '').trim()); return; }
+  if (event === 'adapterExit') { debugLog('adapter exited' + (body && body.code != null ? ' (code ' + body.code + ')' : '') + '.'); if (S.debug) { await stopDebugSession(true); } return; }
+  if (!S.debug) return;
+  switch (event) {
+    case 'initialized':
+      if (debugInitializedResolve) { const fn = debugInitializedResolve; debugInitializedResolve = null; fn(); }
+      break;
+    case 'process':
+      debugLog('process: ' + ((body && body.name) || ''));
+      break;
+    case 'output':
+      debugLog(((body && body.output) || '').replace(/\n$/, ''));
+      break;
+    case 'breakpoint':
+      // Adapter may adjust breakpoint lines; accept the verified line.
+      if (body && body.breakpoint && body.breakpoint.verified && body.breakpoint.line) {
+        debugLog('breakpoint verified at line ' + body.breakpoint.line);
+      }
+      break;
+    case 'stopped': {
+      debugState('paused' + (body && body.reason ? ' (' + body.reason + ')' : ''));
+      const threadId = body && body.threadId ? body.threadId : null;
+      await refreshDebugStopped(threadId);
+      break;
+    }
+    case 'continued':
+      debugState('running');
+      clearPausedHighlight();
+      break;
+    case 'exited':
+      debugLog('program exited (code ' + ((body && body.exitCode) != null ? body.exitCode : '?') + ').');
+      break;
+    case 'terminated':
+      await stopDebugSession(true);
+      break;
+    default:
+      break;
+  }
+}
+
+async function refreshDebugStopped(threadId) {
+  const session = S.debug;
+  if (!session) return;
+  try {
+    if (threadId) session.threadId = threadId;
+    const threadsRes = await api.dap.request({ id: session.id, method: 'threads', params: {} });
+    const threads = (threadsRes && threadsRes.ok && threadsRes.result && threadsRes.result.threads) || [];
+    if (!session.threadId && threads.length) session.threadId = threads[0].id;
+    const stackRes = await api.dap.request({ id: session.id, method: 'stackTrace', params: { threadId: session.threadId || (threads[0] && threads[0].id) || 0, levels: 20 } });
+    const frames = (stackRes && stackRes.ok && stackRes.result && stackRes.result.stackFrames) || [];
+    session.frames = frames;
+    renderDebugStack(frames);
+    if (frames.length) {
+      const top = frames[0];
+      if (top.source && top.source.path) {
+        await openFile(top.source.path, top.line, top.column || 1);
+        highlightPausedLine(top.source.path, top.line);
+      }
+    }
+    const topFrame = frames[0];
+    if (topFrame) await refreshDebugVariables(topFrame.id);
+    showPanel('debugPane');
+  } catch (err) {
+    debugLog('Could not refresh stack: ' + err.message);
+  }
+}
+
+async function refreshDebugVariables(frameId) {
+  const session = S.debug;
+  if (!session) return;
+  const host = $('debugVariables');
+  host.replaceChildren();
+  try {
+    const scopesRes = await api.dap.request({ id: session.id, method: 'scopes', params: { frameId } });
+    const scopes = (scopesRes && scopesRes.ok && scopesRes.result && scopesRes.result.scopes) || [];
+    for (const scope of scopes.slice(0, 6)) {
+      const scopeRow = el('div', 'debug-scope', scope.name);
+      host.appendChild(scopeRow);
+      const varsRes = await api.dap.request({ id: session.id, method: 'variables', params: { variablesReference: scope.variablesReference, start: 0, count: 80 } });
+      const vars = (varsRes && varsRes.ok && varsRes.result && varsRes.result.variables) || [];
+      for (const v of vars) host.appendChild(debugVariableRow(v, 1));
+    }
+    if (!scopes.length) host.appendChild(el('div', 'debug-empty', 'No variables in scope.'));
+  } catch (err) {
+    host.replaceChildren(el('div', 'debug-empty', err.message));
+  }
+}
+
+function debugVariableRow(variable, depth) {
+  const row = el('div', 'debug-var');
+  row.style.paddingLeft = (depth * 14) + 'px';
+  const name = el('span', 'debug-var-name', variable.name);
+  const value = el('span', 'debug-var-value', variable.value || '');
+  row.append(name, value);
+  row.title = variable.value || '';
+  if (variable.variablesReference > 0 && depth < 4) {
+    row.appendChild(el('span', 'debug-var-expand', '▸'));
+    row.classList.add('expandable');
+    let expanded = false;
+    row.onclick = async () => {
+      if (expanded) return;
+      expanded = true;
+      row.querySelector('.debug-var-expand').textContent = '▾';
+      const session = S.debug;
+      if (!session) return;
+      try {
+        const res = await api.dap.request({ id: session.id, method: 'variables', params: { variablesReference: variable.variablesReference, start: 0, count: 80 } });
+        const vars = (res && res.ok && res.result && res.result.variables) || [];
+        for (const v of vars) row.parentNode.insertBefore(debugVariableRow(v, depth + 1), row.nextSibling);
+        if (!vars.length) row.parentNode.insertBefore(el('div', 'debug-empty', '(empty)'), row.nextSibling);
+      } catch (err) { debugLog('variables: ' + err.message); }
+    };
+  }
+  return row;
+}
+
+function renderDebugStack(frames) {
+  const host = $('debugStack');
+  host.replaceChildren();
+  if (!frames || !frames.length) { host.appendChild(el('div', 'debug-empty', 'No frames.')); return; }
+  frames.forEach((frame, index) => {
+    const row = el('div', 'debug-frame' + (index === 0 ? ' top' : ''));
+    const name = el('div', 'debug-frame-name', frame.name || '(anonymous)');
+    const loc = el('div', 'debug-frame-loc', (frame.source && frame.source.name ? frame.source.name + ':' : '') + frame.line);
+    row.append(name, loc);
+    row.onclick = async () => {
+      if (frame.source && frame.source.path) {
+        await openFile(frame.source.path, frame.line, frame.column || 1);
+        highlightPausedLine(frame.source.path, frame.line);
+      }
+    };
+    host.appendChild(row);
+  });
+}
+
+/* ---------------- breakpoints ---------------- */
+
+function breakpointKey(path) {
+  return PB.normalizePath(path || '').toLowerCase();
+}
+
+function toggleBreakpoint(path, line) {
+  const key = breakpointKey(path);
+  const lines = S.breakpoints.get(key) || [];
+  const index = lines.indexOf(line);
+  if (index >= 0) lines.splice(index, 1);
+  else { lines.push(line); lines.sort((a, b) => a - b); }
+  S.breakpoints.set(key, lines);
+  renderBreakpoints();
+  if (S.debug) sendBreakpointsToAdapter();
+  return index < 0;
+}
+
+function renderBreakpoints() {
+  for (const entry of S.models.values()) {
+    if (entry.virtual || !entry.path) continue;
+    applyBreakpointDecorations(entry);
+  }
+}
+
+function applyBreakpointDecorations(entry) {
+  if (!entry || !entry.model) return;
+  const key = breakpointKey(entry.path);
+  const lines = S.breakpoints.get(key) || [];
+  const decorations = lines.map((line) => ({
+    range: new monaco.Range(line, 1, line, 1),
+    options: {
+      isWholeLine: false,
+      glyphMarginClassName: 'peabox-breakpoint',
+      stickiness: monaco.editor.TrackedRangeStickiness.NeverGrowsWhenTypingAtEdges,
+      overviewRuler: { color: 'rgba(229,83,75,0.8)', position: monaco.editor.OverviewRulerLane.Right }
+    }
+  }));
+  const old = entry.bpIds || [];
+  try { entry.bpIds = entry.model.deltaDecorations(old, decorations); } catch { entry.bpIds = []; }
+}
+
+async function sendBreakpointsToAdapter() {
+  const session = S.debug;
+  if (!session) return;
+  for (const [key, lines] of S.breakpoints) {
+    if (!lines.length) continue;
+    const entry = Array.from(S.models.values()).find((e) => e.path && breakpointKey(e.path) === key);
+    const path = entry ? entry.path : key;
+    try {
+      await api.dap.request({ id: session.id, method: 'setBreakpoints', params: {
+        source: { path, name: PB.basename(path) },
+        breakpoints: lines.map((line) => ({ line })),
+        sourceModified: false
+      } });
+    } catch (err) { debugLog('breakpoints: ' + err.message); }
+  }
+}
+
+function highlightPausedLine(path, line) {
+  clearPausedHighlight();
+  const entry = S.models.get(path) || Array.from(S.models.values()).find((e) => e.path && breakpointKey(e.path) === breakpointKey(path));
+  if (!entry || !S.editor || S.editor.getModel() !== entry.model) return;
+  entry.pausedIds = entry.model.deltaDecorations([], [{
+    range: new monaco.Range(line, 1, line, 1),
+    options: {
+      isWholeLine: true,
+      className: 'peabox-paused-line',
+      linesDecorationsClassName: 'peabox-paused-arrow',
+      overviewRuler: { color: 'rgba(229,175,58,0.9)', position: monaco.editor.OverviewRulerLane.Center }
+    }
+  }]);
+}
+
+function clearPausedHighlight() {
+  for (const entry of S.models.values()) {
+    if (entry.pausedIds && entry.model) {
+      try { entry.model.deltaDecorations(entry.pausedIds, []); } catch { /* ignore */ }
+      entry.pausedIds = null;
+    }
+  }
+}
+
+/* ---------------- debug pane UI ---------------- */
+
+function debugState(text) {
+  $('debugState').textContent = text || '';
+}
+
+function debugLogClear() {
+  $('debugLog').textContent = '';
+}
+
+function debugLog(message) {
+  const host = $('debugLog');
+  host.textContent += (host.textContent ? '\n' : '') + message;
+  host.scrollTop = host.scrollHeight;
+}
+
+function updateDebugToolbar() {
+  const active = !!S.debug;
+  ['debugContinue', 'debugPause', 'debugStepOver', 'debugStepIn', 'debugStepOut'].forEach((id) => {
+    $(id).disabled = !active;
+  });
+  $('debugStop').disabled = !active;
+  if (!active) {
+    $('debugStack').replaceChildren(el('div', 'debug-empty', 'No active session.'));
+    $('debugVariables').replaceChildren(el('div', 'debug-empty', 'No active session.'));
+  }
+}
+
+function wireDebugUi() {
+  $('debugContinue').onclick = () => debugContinue();
+  $('debugPause').onclick = () => debugPause();
+  $('debugStepOver').onclick = () => debugStepOver();
+  $('debugStepIn').onclick = () => debugStepIn();
+  $('debugStepOut').onclick = () => debugStepOut();
+  $('debugStop').onclick = () => stopDebugSession();
+  updateDebugToolbar();
+  api.on.dapEvent((evt) => { handleDapEvent(evt).catch(() => {}); });
 }
 
 function renderGitNoRepo(message) {
@@ -3260,6 +3697,7 @@ function showPanel(panelName) {
   setHidden($('terminalPane'), S.panel !== 'terminalPane');
   setHidden($('outputPane'), S.panel !== 'outputPane');
   setHidden($('problemsPane'), S.panel !== 'problemsPane');
+  setHidden($('debugPane'), S.panel !== 'debugPane');
   updateRunInput();
   if (S.panel === 'terminalPane' && S.activeTerminal) setTimeout(() => fitTerminal(S.activeTerminal), 30);
 }
@@ -3494,6 +3932,13 @@ function commandList() {
     { id: 'git.amend', label: 'Git: Amend Last Commit…', run: () => amendCommitFlow() },
     { id: 'run.start', label: 'Run: Run Current File', key: 'F5', run: () => runCurrent() },
     { id: 'run.stop', label: 'Run: Stop', key: 'Shift+F5', run: () => stopRun() },
+    { id: 'debug.start', label: 'Debug: Start Debugging…', run: () => startDebugFlow() },
+    { id: 'debug.stop', label: 'Debug: Stop Session', key: 'Shift+F5', run: () => stopDebugSession() },
+    { id: 'debug.toggleBreakpoint', label: 'Debug: Toggle Breakpoint at Cursor', key: 'F9', run: () => debugToggleBreakpointAtCursor() },
+    { id: 'debug.continue', label: 'Debug: Continue', key: 'F5', run: () => debugContinue() },
+    { id: 'debug.stepOver', label: 'Debug: Step Over', key: 'F10', run: () => debugStepOver() },
+    { id: 'debug.stepIn', label: 'Debug: Step In', key: 'F11', run: () => debugStepIn() },
+    { id: 'debug.stepOut', label: 'Debug: Step Out', key: 'Shift+F11', run: () => debugStepOut() },
     { id: 'terminal.new', label: 'Terminal: New Terminal', run: () => createTerminal() },
     { id: 'run.clearOutput', label: 'Output: Clear', run: () => { $('output').textContent = ''; showPanel('outputPane'); } },
     { id: 'editor.find', label: 'Editor: Find', key: 'Ctrl+F', run: () => editorAction('actions.find') },
@@ -3784,6 +4229,15 @@ function zoomEditor(delta) {
   applyEditorOptions();
   persistSoon();
   toast('Editor font size: ' + s.fontSize + 'px', 'info', 1400);
+}
+
+function debugToggleBreakpointAtCursor() {
+  const entry = currentEntry();
+  if (!entry || !S.editor) { toast('Open a file first.', 'warn'); return; }
+  const pos = S.editor.getPosition();
+  if (!pos) return;
+  const added = toggleBreakpoint(entry.path, pos.lineNumber);
+  toast((added ? 'Breakpoint set at' : 'Breakpoint removed from') + ' line ' + pos.lineNumber + '.', 'info', 1600);
 }
 
 function terminalToggle() {
@@ -4277,7 +4731,10 @@ function showShortcuts() {
     ['Outline', 'Ctrl+Shift+U'],
     ['Settings', 'Ctrl+,'],
     ['Run current file', 'F5'],
-    ['Stop', 'Shift+F5']
+    ['Stop', 'Shift+F5'],
+    ['Toggle breakpoint', 'F9'],
+    ['Step over / in / out', 'F10 / F11 / Shift+F11'],
+    ['Continue (debugging)', 'F5']
   ];
   const body = el('div', 'settings-grid');
   const list = el('div', 'shortcut-list');
@@ -4435,6 +4892,13 @@ function handleMenuCommand(payload) {
     'terminal.toggle': () => terminalToggle(),
     'run.start': () => runCurrent(),
     'run.stop': () => stopRun(),
+    'debug.start': () => startDebugFlow(),
+    'debug.stop': () => stopDebugSession(),
+    'debug.toggleBreakpoint': () => debugToggleBreakpointAtCursor(),
+    'debug.continue': () => debugContinue(),
+    'debug.stepOver': () => debugStepOver(),
+    'debug.stepIn': () => debugStepIn(),
+    'debug.stepOut': () => debugStepOut(),
     'editor.find': () => editorAction('actions.find'),
     'editor.replace': () => editorAction('editor.action.startFindReplaceAction'),
     'editor.gotoLine': () => editorAction('editor.action.gotoLine'),
@@ -4604,6 +5068,10 @@ function onKeyDown(event) {
   if (event.altKey && key === 'ArrowUp') { event.preventDefault(); editorAction('editor.action.moveLinesUpAction'); return; }
   if (key === 'F12') { event.preventDefault(); if (event.shiftKey) findLspReferences(); else goToDefinition(); return; }
   if (key === 'F2') { event.preventDefault(); renameSymbolLsp(); return; }
+  if (key === 'F9') { event.preventDefault(); debugToggleBreakpointAtCursor(); return; }
+  if (S.debug && key === 'F5') { event.preventDefault(); debugContinue(); return; }
+  if (S.debug && key === 'F10') { event.preventDefault(); debugStepOver(); return; }
+  if (S.debug && key === 'F11') { event.preventDefault(); if (event.shiftKey) debugStepOut(); else debugStepIn(); return; }
   if (key === 'F5') { event.preventDefault(); if (event.shiftKey) stopRun(); else runCurrent(); return; }
   if (mod && key === 'Tab' && event.shiftKey) { event.preventDefault(); cycleTabs(-1); return; }
   if (mod && key === 'Tab' && !event.shiftKey) { event.preventDefault(); cycleTabs(1); return; }
@@ -4684,6 +5152,7 @@ function bindEvents() {
 
   document.addEventListener('keydown', onKeyDown, true);
   wireExternalDragDrop();
+  wireDebugUi();
   window.addEventListener('resize', () => { if (S.activeTerminal) fitTerminal(S.activeTerminal); });
   window.addEventListener('focus', () => {
     checkExternalChangesOnFocus().catch(() => {});

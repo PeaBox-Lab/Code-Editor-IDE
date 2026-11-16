@@ -1290,6 +1290,64 @@
     };
   }
 
+  /**
+   * Minimal Debug Adapter Protocol client speaking DAP over stdio frames
+   * (same Content-Length framing as LSP, different message shape).
+   * @param {{write?: (chunk:string)=>void}} transport
+   * @returns {{request:(cmd:string, args?:object)=>Promise, onData:(chunk:string)=>void,
+   *            onEvent:(fn:(evt:{event:string, body:object})=>void)=>void, pendingCount:()=>number}}
+   */
+  function createDapClient(transport) {
+    var write = (transport && transport.write) || function () {};
+    var seq = 1;
+    var pending = {};
+    var buffer = '';
+    var eventListeners = [];
+
+    function dispatch(msg) {
+      if (!msg || typeof msg !== 'object') return;
+      if (msg.type === 'response') {
+        var p = pending[msg.request_seq];
+        if (p) {
+          delete pending[msg.request_seq];
+          if (msg.success) p.resolve(msg.body !== undefined ? msg.body : true);
+          else {
+            var message = msg.message;
+            if (message && typeof message === 'object' && message.format) message = message.format;
+            p.reject(new Error(message || (String(msg.command || 'request') + ' failed')));
+          }
+        }
+        return;
+      }
+      if (msg.type === 'event' || typeof msg.event === 'string') {
+        for (var i = 0; i < eventListeners.length; i++) {
+          try { eventListeners[i]({ event: msg.event, body: msg.body }); } catch (e) { /* ignore */ }
+        }
+      }
+    }
+
+    function onData(chunk) {
+      buffer += str(chunk);
+      var parsed = splitLSPMessages(buffer);
+      buffer = parsed.rest;
+      for (var i = 0; i < parsed.messages.length; i++) dispatch(parsed.messages[i]);
+    }
+
+    function request(cmd, args) {
+      var id = seq++;
+      var promise = new Promise(function (resolve, reject) { pending[id] = { resolve: resolve, reject: reject }; });
+      write(encodeLSPMessage({ seq: id, type: 'request', cmd: cmd, args: args || {} }));
+      return promise;
+    }
+
+    return {
+      request: request,
+      onData: onData,
+      onEvent: function (fn) { eventListeners.push(fn); },
+      pendingCount: function () { return Object.keys(pending).length; }
+    };
+  }
+
   /* ---------------- AI provider helpers ---------------- */
 
   var AI_PROVIDERS = [
@@ -1510,6 +1568,7 @@
     toMonacoHover: toMonacoHover,
     toMonacoLocation: toMonacoLocation,
     createLspClient: createLspClient,
+    createDapClient: createDapClient,
     defaultSession: defaultSession,
     sanitizeSession: sanitizeSession,
     reorderKeys: reorderKeys,
