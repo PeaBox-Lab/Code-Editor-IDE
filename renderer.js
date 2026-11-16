@@ -1201,6 +1201,21 @@ async function openFile(filePath, line, column) {
   if (!filePath) return;
   let entry = S.models.get(filePath);
   if (!entry) {
+    let stat;
+    try { stat = await api.file.stat(filePath); } catch { stat = null; }
+    const size = stat && (stat.size !== undefined ? stat.size : stat.size);
+    const LARGE_FILE = 5 * 1024 * 1024;
+    if (stat && size > LARGE_FILE) {
+      const answer = await showModal({
+        title: 'Large file',
+        body: 'This file is ' + PB.formatBytes(size) + '. Opening it in the editor may be slow. Open anyway?',
+        actions: [
+          { label: 'Cancel', value: null },
+          { label: 'Open anyway', value: 'open', class: 'primary' }
+        ]
+      });
+      if (answer !== 'open') return;
+    }
     try {
       const res = await api.file.read(filePath);
       const model = monaco.editor.createModel(res.content, PB.normalizeLanguage(filePath), monaco.Uri.file(filePath));
