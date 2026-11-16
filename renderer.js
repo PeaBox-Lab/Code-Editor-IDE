@@ -3905,6 +3905,7 @@ function commandList() {
     { id: 'file.close', label: 'File: Close Editor', key: 'Ctrl+W', run: () => closeEntry(currentEntry()) },
     { id: 'file.closeAll', label: 'File: Close All Editors', run: () => closeAll() },
     { id: 'file.compare', label: 'File: Compare Files…', run: () => compareFilesFlow() },
+    { id: 'view.markdownPreview', label: 'View: Markdown Preview', run: () => openMarkdownPreview() },
     { id: 'file.insertSnippet', label: 'Editor: Insert Snippet…', run: () => insertSnippetFlow() },
     { id: 'view.explorer', label: 'View: Explorer', key: 'Ctrl+Shift+E', run: () => showView('explorer') },
     { id: 'view.search', label: 'View: Search', key: 'Ctrl+Shift+F', run: () => showView('search') },
@@ -4888,6 +4889,7 @@ function handleMenuCommand(payload) {
     'workbench.prevEditor': () => cycleTabs(-1),
     'workbench.reopenClosed': () => reopenClosedEditor(),
     'file.compare': () => compareFilesFlow(),
+    'view.markdownPreview': () => openMarkdownPreview(),
     'file.insertSnippet': () => insertSnippetFlow(),
     'app.settings': () => openSettings(),
     'app.shortcuts': () => showShortcuts(),
@@ -4953,6 +4955,62 @@ function handleMenuCommand(payload) {
 
 /* ---------------- keyboard ---------------- */
 
+function renderMarkdown(text) {
+  const lines = String(text || '').split(/\\r?\\n/);
+  const out = [];
+  let inCode = false;
+  let codeLines = [];
+  let inList = false;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (line.trim().startsWith('```')) {
+      if (inCode) { out.push('<pre><code>' + escapeHtml(codeLines.join('\\n')) + '</code></pre>'); codeLines = []; inCode = false; }
+      else { if (inList) { out.push('</ul>'); inList = false; } inCode = true; }
+      continue;
+    }
+    if (inCode) { codeLines.push(line); continue; }
+    if (/^#{1,6}\\s/.test(line)) {
+      if (inList) { out.push('</ul>'); inList = false; }
+      const level = line.match(/^#+/)[0].length;
+      out.push('<h' + level + '>' + inlineMd(line.replace(/^#+\\s*/, '')) + '</h' + level + '>');
+      continue;
+    }
+    if (/^[-*]\\s/.test(line)) {
+      if (!inList) { out.push('<ul>'); inList = true; }
+      out.push('<li>' + inlineMd(line.replace(/^[-*]\\s/, '')) + '</li>');
+      continue;
+    }
+    if (line.trim() === '') {
+      if (inList) { out.push('</ul>'); inList = false; }
+      continue;
+    }
+    if (inList) { out.push('</ul>'); inList = false; }
+    out.push('<p>' + inlineMd(line) + '</p>');
+  }
+  if (inCode) out.push('<pre><code>' + escapeHtml(codeLines.join('\\n')) + '</code></pre>');
+  if (inList) out.push('</ul>');
+  return out.join('\\n');
+}
+
+function inlineMd(text) {
+  return escapeHtml(text)
+    .replace(/\\*\\*(.+?)\\*\\*/g, '<strong>$1</strong>')
+    .replace(/\\*(.+?)\\*/g, '<em>$1</em>')
+    .replace(/`(.+?)`/g, '<code>$1</code>')
+    .replace(/\\[(.+?)\\]\\((.+?)\\)/g, '<a href=\"$2\" target=\"_blank\" rel=\"noopener\">$1</a>');
+}
+
+function openMarkdownPreview() {
+  const entry = currentEntry();
+  if (!entry || entry.virtual) { toast('Open a Markdown file first.', 'warn'); return; }
+  const body = el('div', 'markdown-preview');
+  body.innerHTML = renderMarkdown(entry.model.getValue());
+  showModal({
+    title: 'Preview · ' + PB.basename(entry.path),
+    body,
+    actions: [{ label: 'Close', value: null }]
+  });
+}
 function isTypingTarget(target) {
   if (!target) return false;
   const tag = target.tagName;
