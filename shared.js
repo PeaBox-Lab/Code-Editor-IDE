@@ -880,6 +880,18 @@
       text = dedupeLines(source, options);
     } else if (id === 'trim-trailing-whitespace') {
       text = trimTrailingWhitespace(source);
+    } else if (id === 'uppercase') {
+      text = source.toUpperCase();
+    } else if (id === 'lowercase') {
+      text = source.toLowerCase();
+    } else if (id === 'title-case') {
+      text = source.replace(/\\S+/g, function (w) { return w.charAt(0).toUpperCase() + w.slice(1).toLowerCase(); });
+    } else if (id === 'camel-case') {
+      text = source.trim().replace(/[^A-Za-z0-9]+(.)?/g, function (_, c) { return c ? c.toUpperCase() : ''; });
+    } else if (id === 'snake-case') {
+      text = source.trim().replace(/([a-z])([A-Z])/g, '$1_$2').replace(/[^A-Za-z0-9]+/g, '_').toLowerCase();
+    } else if (id === 'kebab-case') {
+      text = source.trim().replace(/([a-z])([A-Z])/g, '$1-$2').replace(/[^A-Za-z0-9]+/g, '-').toLowerCase();
     } else {
       return { ok: false, error: 'Unknown text transform.' };
     }
