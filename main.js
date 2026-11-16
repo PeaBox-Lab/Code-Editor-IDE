@@ -1667,43 +1667,6 @@ ipcMain.handle('ai:setKey', (_, payload) => {
   return { ok: true, provider: id, masked: key ? PB.maskSecret(key) : '' };
 });
 
-ipcMain.handle('ai:diagnose', async (_, payload) => {
-  const providerId = String((payload && payload.provider) || '');
-  const provider = PB.aiProviderById(providerId);
-  if (!provider) return { ok: false, error: 'Unknown AI provider: ' + providerId };
-  const store = readAiKeyStore();
-  const key = decryptSecret(store[providerId]);
-  if (provider.needsKey && !key) return { ok: false, error: 'No API key set for ' + provider.label + '.' };
-  let url;
-  if (provider.id === 'ollama') url = String(provider.endpoint).replace(/\/v1\/?$/, '') + '/api/tags';
-  else if (provider.kind === 'anthropic') url = String(provider.endpoint).replace(/\/+$/, '') + '/models';
-  else url = String(provider.endpoint).replace(/\/+$/, '') + '/models';
-  const headers = {};
-  if (provider.kind === 'anthropic') { if (key) headers['x-api-key'] = key; headers['anthropic-version'] = '2023-06-01'; }
-  else if (key) { if (provider.id === 'azure') headers['api-key'] = key; else headers['Authorization'] = 'Bearer ' + key; }
-  try {
-    const res = await httpSend({ url: url, method: 'GET', headers: headers, timeoutMs: 15000 });
-    if (res.status >= 200 && res.status < 300) return { ok: true, status: res.status, message: 'Connected to ' + provider.label + ' (HTTP ' + res.status + ').' };
-    const detail = (res.json && res.json.error && (res.json.error.message || res.json.error)) || res.text || ('HTTP ' + res.status);
-    return { ok: false, status: res.status, error: 'HTTP ' + res.status + ': ' + String(detail).slice(0, 300) };
-  } catch (err) {
-    return { ok: false, error: 'Could not reach ' + provider.label + ': ' + (err && err.message || err) };
-  }
-});
-
-ipcMain.handle('ai:complete', async (_, payload) => {
-  const messages = PB.aiCompletionMessages(payload && payload.language, payload && payload.prefix, payload && payload.suffix);
-  const res = await aiRequest({
-    providerId: payload && payload.provider,
-    model: payload && payload.model,
-    endpoint: payload && payload.endpoint,
-    messages: messages,
-    maxTokens: 256,
-    temperature: 0.1
-  });
-  return { ok: true, completion: PB.extractCodeFence(res.text) };
-});
-
 ipcMain.handle('ai:chat', async (_, payload) => {
   const messages = PB.aiChatMessages(payload && payload.question, payload && payload.context);
   const res = await aiRequest({
@@ -1713,71 +1676,6 @@ ipcMain.handle('ai:chat', async (_, payload) => {
     messages: messages,
     maxTokens: 1024,
     temperature: 0.3
-  });
-  return { ok: true, text: res.text };
-});
-
-/* ---------------- IPC: AI file creation ---------------- */
-
-ipcMain.handle('ai:createFile', async (_, payload) => {
-  const dir = assertWorkspaceDir(payload && payload.dir);
-  const check = PB.validateEntryName(payload && payload.name);
-  if (!check.ok) throw new Error(check.error);
-  const full = path.join(dir, check.value);
-  if (fs.existsSync(full)) throw new Error('An item with that name already exists.');
-  const content = typeof (payload && payload.content) === 'string' ? payload.content : '';
-  if (content.length > 50 * 1024 * 1024) throw new Error('File is too large to save.');
-  writeFileAtomic.sync(full, content, { encoding: 'utf8', fsync: true });
-  addAllowed(full);
-  return { path: full, rel: check.value, size: content.length };
-});
-
-ipcMain.handle('ai:createFolder', async (_, payload) => {
-  const dir = assertWorkspaceDir(payload && payload.dir);
-  const check = PB.validateEntryName(payload && payload.name);
-  if (!check.ok) throw new Error(check.error);
-  const full = path.join(dir, check.value);
-  if (fs.existsSync(full)) throw new Error('An item with that name already exists.');
-  await fsp.mkdir(full, { recursive: true });
-  addAllowed(full);
-  return { path: full, rel: check.value };
-});
-
-ipcMain.handle('ai:codegen', async (_, payload) => {
-  const messages = PB.aiCodegenMessages(payload && payload.filePath, payload && payload.description, payload && payload.content);
-  const res = await aiRequest({
-    providerId: payload && payload.provider,
-    model: payload && payload.model,
-    endpoint: payload && payload.endpoint,
-    messages: messages,
-    maxTokens: 4096,
-    temperature: 0.2
-  });
-  return { ok: true, text: res.text };
-});
-
-ipcMain.handle('ai:scaffold', async (_, payload) => {
-  const messages = PB.aiScaffoldMessages(payload && payload.description);
-  const res = await aiRequest({
-    providerId: payload && payload.provider,
-    model: payload && payload.model,
-    endpoint: payload && payload.endpoint,
-    messages: messages,
-    maxTokens: 8192,
-    temperature: 0.3
-  });
-  return { ok: true, text: res.text };
-});
-
-ipcMain.handle('ai:edit', async (_, payload) => {
-  const messages = PB.aiEditMessages(payload && payload.filePath, payload && payload.instructions, payload && payload.content);
-  const res = await aiRequest({
-    providerId: payload && payload.provider,
-    model: payload && payload.model,
-    endpoint: payload && payload.endpoint,
-    messages: messages,
-    maxTokens: 8192,
-    temperature: 0.2
   });
   return { ok: true, text: res.text };
 });

@@ -3991,11 +3991,7 @@ function commandList() {
     { id: 'lsp.start', label: 'Language Servers: Start…', run: () => openLspStart() },
     { id: 'lsp.wire', label: 'Language Servers: Wire to Current Editor', run: () => wireLspToEditor() },
     { id: 'ai.settings', label: 'AI: Open AI Settings', run: () => openAiSettings() },
-    { id: 'ai.chat', label: 'AI: Chat', run: () => openAiChat() },
-    { id: 'ai.complete', label: 'AI: Trigger Inline Completion', run: async () => { await triggerAiCompletion(); } },
-    { id: 'ai.codegen', label: 'AI: Create File', run: async () => { await openAiFileCreator(); } },
-    { id: 'ai.scaffold', label: 'AI: Scaffold Project', run: async () => { await openAiProjectScaffold(); } },
-    { id: 'ai.edit', label: 'AI: Edit Current File', run: async () => { await applyAiToCurrentFile(); } }
+    { id: 'ai.chat', label: 'AI: Chat', run: () => openAiChat() }
   ];
 }
 

@@ -124,14 +124,7 @@ contextBridge.exposeInMainWorld('api', {
     providers: () => invoke('ai:providers'),
     keyStatus: () => invoke('ai:keyStatus'),
     setKey: (payload) => invoke('ai:setKey', payload),
-    diagnose: (payload) => invoke('ai:diagnose', payload),
-    complete: (payload) => invoke('ai:complete', payload),
-    chat: (payload) => invoke('ai:chat', payload),
-    createFile: (payload) => invoke('ai:createFile', payload),
-    createFolder: (payload) => invoke('ai:createFolder', payload),
-    codegen: (payload) => invoke('ai:codegen', payload),
-    scaffold: (payload) => invoke('ai:scaffold', payload),
-    edit: (payload) => invoke('ai:edit', payload)
+    chat: (payload) => invoke('ai:chat', payload)
   },
 
   recovery: {
