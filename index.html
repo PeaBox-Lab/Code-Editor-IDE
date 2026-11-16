@@ -119,6 +119,7 @@
             <input id="searchInput" type="text" placeholder="Search in files" autocomplete="off" spellcheck="false">
             <button id="searchCase" class="toggle" title="Match case">Aa</button>
             <button id="searchWord" class="toggle" title="Whole word">W</button>
+            <button id="searchRegex" class="toggle" title="Use regular expression">.*</button>
           </div>
           <div id="searchReplaceRow" class="search-input-row hidden">
             <input id="replaceInput" type="text" placeholder="Replace with…" autocomplete="off" spellcheck="false">
@@ -174,6 +175,7 @@
       <div id="editorArea" class="editor-area">
         <div id="editor" class="editor"></div>
         <div id="editor2" class="editor hidden"></div>
+        <div id="diffEditor" class="editor hidden"></div>
 
         <div id="welcome" class="welcome">
           <div class="welcome-inner">

@@ -646,8 +646,17 @@ ipcMain.handle('workspace:search', async (_, payload) => {
   if (!query) return { hits: [], truncated: false, filesScanned: 0 };
   const caseSensitive = !!(payload && payload.caseSensitive);
   const wholeWord = !!(payload && payload.wholeWord);
+  const useRegex = !!(payload && payload.useRegex);
   const maxResults = PB.clamp(payload && payload.maxResults || 800, 1, 2000);
   const excludes = PB.splitExcludes(payload && payload.excludes);
+  let matcher = null;
+  if (useRegex) {
+    try {
+      matcher = new RegExp(query, caseSensitive ? 'g' : 'gi');
+    } catch (err) {
+      return { hits: [], truncated: false, filesScanned: 0, error: 'Invalid regular expression: ' + err.message };
+    }
+  }
   const needle = caseSensitive ? query : query.toLowerCase();
   const hits = [];
   let truncated = false;
@@ -663,14 +672,26 @@ ipcMain.handle('workspace:search', async (_, payload) => {
     const lines = buf.toString('utf8').split(/\r?\n/);
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
-      const hay = caseSensitive ? line : line.toLowerCase();
-      let idx = hay.indexOf(needle);
-      while (idx >= 0) {
-        if (!wholeWord || PB.boundaryMatch(line, idx, query.length)) {
-          hits.push({ path: full, rel, line: i + 1, column: idx + 1, text: line.trim().slice(0, 220) });
-          if (hits.length >= maxResults) { truncated = true; break; }
+      if (useRegex) {
+        matcher.lastIndex = 0;
+        let m = matcher.exec(line);
+        while (m) {
+          if (m[0].length) {
+            hits.push({ path: full, rel, line: i + 1, column: m.index + 1, text: line.trim().slice(0, 220), length: m[0].length });
+            if (hits.length >= maxResults) { truncated = true; break; }
+          }
+          m = matcher.exec(line);
         }
-        idx = hay.indexOf(needle, idx + Math.max(1, needle.length));
+      } else {
+        const hay = caseSensitive ? line : line.toLowerCase();
+        let idx = hay.indexOf(needle);
+        while (idx >= 0) {
+          if (!wholeWord || PB.boundaryMatch(line, idx, query.length)) {
+            hits.push({ path: full, rel, line: i + 1, column: idx + 1, text: line.trim().slice(0, 220), length: query.length });
+            if (hits.length >= maxResults) { truncated = true; break; }
+          }
+          idx = hay.indexOf(needle, idx + Math.max(1, needle.length));
+        }
       }
       if (truncated) break;
     }
@@ -688,7 +709,8 @@ ipcMain.handle('workspace:replace', async (_, payload) => {
   const dryRun = !payload || payload.dryRun !== false;
   const options = {
     caseSensitive: !!(payload && payload.caseSensitive),
-    wholeWord: !!(payload && payload.wholeWord)
+    wholeWord: !!(payload && payload.wholeWord),
+    useRegex: !!(payload && payload.useRegex)
   };
   const excludes = PB.splitExcludes(payload && payload.excludes);
   const files = [];

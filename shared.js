@@ -852,13 +852,89 @@
     var source = str(content);
     var needle = str(query);
     if (!needle) return { text: source, count: 0 };
-    var pattern = escapeRegExp(needle);
-    if (options.wholeWord) pattern = '(?<![A-Za-z0-9_])' + pattern + '(?![A-Za-z0-9_])';
+    var pattern;
+    if (options.useRegex) {
+      pattern = needle;
+    } else {
+      pattern = escapeRegExp(needle);
+      if (options.wholeWord) pattern = '(?<![A-Za-z0-9_])' + pattern + '(?![A-Za-z0-9_])';
+    }
     var flags = options.caseSensitive ? 'g' : 'gi';
-    var re = new RegExp(pattern, flags);
+    var re;
+    try { re = new RegExp(pattern, flags); }
+    catch (err) { return { text: source, count: 0, error: 'Invalid pattern: ' + err.message }; }
     var count = 0;
     var text = source.replace(re, function () { count++; return str(replacement); });
     return { text: text, count: count };
+  }
+
+  /* ---------------- snippets ---------------- */
+
+  var SNIPPETS = {
+    javascript: [
+      { name: 'function', body: 'function ${1:name}(${2:params}) {\n\t$0\n}' },
+      { name: 'arrow function', body: 'const ${1:name} = (${2:params}) => {\n\t$0\n};' },
+      { name: 'async function', body: 'async function ${1:name}(${2:params}) {\n\t$0\n}' },
+      { name: 'for loop', body: 'for (let ${1:i} = 0; ${1:i} < ${2:array}.length; ${1:i}++) {\n\t$0\n}' },
+      { name: 'for-of loop', body: 'for (const ${1:item} of ${2:iterable}) {\n\t$0\n}' },
+      { name: 'if statement', body: 'if (${1:condition}) {\n\t$0\n}' },
+      { name: 'try/catch', body: 'try {\n\t$0\n} catch (${1:err}) {\n\t${2:console.error(err);}\n}' },
+      { name: 'class', body: 'class ${1:Name} {\n\tconstructor(${2:params}) {\n\t\t$0\n\t}\n}' },
+      { name: 'console.log', body: 'console.log($0);' },
+      { name: 'setTimeout', body: 'setTimeout(() => {\n\t$0\n}, ${1:delay});' }
+    ],
+    html: [
+      { name: 'html5 boilerplate', body: '<!DOCTYPE html>\n<html lang="en">\n<head>\n\t<meta charset="UTF-8">\n\t<meta name="viewport" content="width=device-width, initial-scale=1.0">\n\t<title>${1:Document}</title>\n</head>\n<body>\n\t$0\n</body>\n</html>' },
+      { name: 'div', body: '<div${1: class="${2:name}"}>\n\t$0\n</div>' },
+      { name: 'table', body: '<table>\n\t<thead>\n\t\t<tr><th>${1:Header}</th></tr>\n\t</thead>\n\t<tbody>\n\t\t<tr><td>$0</td></tr>\n\t</tbody>\n</table>' },
+      { name: 'form', body: '<form${1: action="${2:/submit}" method="${3:post}"}>\n\t$0\n</form>' },
+      { name: 'link stylesheet', body: '<link rel="stylesheet" href="${1:style.css}">' },
+      { name: 'script tag', body: '<script src="${1:app.js}"></script>' }
+    ],
+    css: [
+      { name: 'rule', body: '${1:selector} {\n\t${2:property}: ${3:value};\n\t$0\n}' },
+      { name: 'flexbox', body: 'display: flex;\nalign-items: ${1:center};\njustify-content: ${2:center};\ngap: ${3:8px};' },
+      { name: 'media query', body: '@media (max-width: ${1:768px}) {\n\t$0\n}' }
+    ],
+    json: [
+      { name: 'object', body: '{\n\t"${1:key}": "${2:value}"$0\n}' },
+      { name: 'array of objects', body: '[\n\t{\n\t\t"${1:key}": "${2:value}"\n\t}$0\n]' }
+    ],
+    python: [
+      { name: 'function', body: 'def ${1:name}(${2:params}):\n    $0' },
+      { name: 'class', body: 'class ${1:Name}:\n    def __init__(self${2:, params}):\n        $0' },
+      { name: 'main guard', body: 'if __name__ == "__main__":\n    $0' },
+      { name: 'for loop', body: 'for ${1:item} in ${2:iterable}:\n    $0' },
+      { name: 'try/except', body: 'try:\n    $0\nexcept ${1:Exception} as ${2:e}:\n    ${3:print(e)}' }
+    ],
+    markdown: [
+      { name: 'section header', body: '## ${1:Title}\n\n$0' },
+      { name: 'code block', body: '```${1:lang}\n$0\n```' },
+      { name: 'table', body: '| ${1:Column} | ${2:Column} |\n| --- | --- |\n| $0 |  |' },
+      { name: 'task list', body: '- [ ] ${1:task}\n- [ ] $0' }
+    ]
+  };
+  // Language aliases share a snippet set.
+  var SNIPPET_ALIASES = {
+    javascriptreact: 'javascript', jsx: 'javascript', mjs: 'javascript', cjs: 'javascript',
+    typescript: 'javascript', typescriptreact: 'javascript', tsx: 'javascript', ts: 'javascript',
+    html: 'html', xml: 'html', vue: 'html', svelte: 'html',
+    css: 'css', scss: 'css', less: 'css',
+    json: 'json', jsonc: 'json',
+    python: 'python', py: 'python',
+    markdown: 'markdown', md: 'markdown'
+  };
+
+  /**
+   * Built-in snippets available for a Monaco language id or file extension.
+   * @param {string} languageIdOrExt
+   * @returns {Array<{name:string, body:string}>}
+   */
+  function snippetsFor(languageIdOrExt) {
+    var key = str(languageIdOrExt).toLowerCase();
+    if (!key) return [];
+    key = SNIPPET_ALIASES[key] || key;
+    return SNIPPETS[key] || [];
   }
 
   /* ---------------- session persistence ---------------- */
@@ -1378,6 +1454,7 @@
     applyCarriageReturns: applyCarriageReturns,
     transformText: transformText,
     replaceInText: replaceInText,
+    snippetsFor: snippetsFor,
     // LSP / JSON-RPC protocol helpers
     utf8ByteLength: utf8ByteLength,
     encodeLSPMessage: encodeLSPMessage,

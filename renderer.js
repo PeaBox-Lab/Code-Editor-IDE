@@ -49,6 +49,8 @@ const S = {
   navIndex: -1,
   navNavigating: false,
   recentlyClosed: [],
+  compare: null,
+  diffEditor: null,
   dragKey: null,
   ai: {
     enabled: false,
@@ -643,6 +645,7 @@ async function loadWorkspace(tree, options) {
   S.navHistory = [];
   S.navIndex = -1;
   S.recentlyClosed = [];
+  exitCompare();
   $('workspace').textContent = S.root;
   $('workspace').title = S.root;
   $('workspaceBtn').title = S.root;
@@ -1087,10 +1090,45 @@ function renderBreadcrumb() {
   }
   const rel = relativeToRoot(entry.path);
   const parts = rel.split('/');
+  const acc = [];
   parts.forEach((part, index) => {
     if (index) host.appendChild(el('span', 'sep', '›'));
-    host.appendChild(el('span', 'crumb', part));
+    acc.push(part);
+    const target = PB.normalizePath(S.root + '/' + acc.join('/'));
+    const crumb = el('span', 'crumb', part);
+    crumb.title = 'Reveal in Explorer';
+    crumb.onclick = () => revealInExplorer(target);
+    host.appendChild(crumb);
   });
+}
+
+async function revealInExplorer(path) {
+  if (!S.root || !path) return;
+  showView('explorer');
+  const norm = PB.normalizePath(path).toLowerCase();
+  const rootNorm = PB.normalizePath(S.root).toLowerCase();
+  if (norm === rootNorm) { S.selectedPath = S.root; renderExplorer(); return; }
+  const rel = PB.normalizePath(path).slice(PB.normalizePath(S.root).length + 1);
+  const segments = rel.split('/');
+  // Expand every ancestor folder, then select the final node.
+  let acc = PB.normalizePath(S.root);
+  for (let i = 0; i < segments.length - 1; i++) {
+    acc = PB.normalizePath(acc + '/' + segments[i]);
+    if (!S.expanded.has(acc)) {
+      S.expanded.add(acc);
+      if (!S.treeCache.has(acc)) {
+        try { await loadChildren(acc); } catch { /* skip missing */ }
+      }
+    }
+  }
+  S.selectedPath = PB.normalizePath(path);
+  renderExplorer();
+  const row = $$('#tree .tree-row').find((r) => PB.normalizePath(r.dataset.path || '').toLowerCase() === norm);
+  if (row) {
+    $$('.tree-row.selected').forEach((n) => n.classList.remove('selected'));
+    row.classList.add('selected');
+    row.scrollIntoView({ block: 'nearest' });
+  }
 }
 
 function syncEditorState() {
@@ -1108,6 +1146,7 @@ function syncEditorState() {
 function activateEntry(key) {
   const entry = S.models.get(key);
   if (!entry) return;
+  if (S.compare) exitCompare();
   captureCurrentPosition();
   S.current = key;
   hideContextMenu();
@@ -1456,7 +1495,8 @@ function bindSearch() {
   });
   $('searchCase').onclick = () => { $('searchCase').classList.toggle('active'); runSearch(); };
   $('searchWord').onclick = () => { $('searchWord').classList.toggle('active'); runSearch(); };
-  $('searchClear').onclick = () => { $('searchInput').value = ''; $('searchCase').classList.remove('active'); $('searchWord').classList.remove('active'); clearResults(); };
+  $('searchRegex').onclick = () => { $('searchRegex').classList.toggle('active'); runSearch(); };
+  $('searchClear').onclick = () => { $('searchInput').value = ''; $('searchCase').classList.remove('active'); $('searchWord').classList.remove('active'); $('searchRegex').classList.remove('active'); clearResults(); };
   $('searchReplaceToggle').onclick = () => toggleReplaceRow();
   $('replaceAllBtn').onclick = () => { replaceAllFlow().catch((err) => toast(err.message, 'error')); };
   $('replaceInput').addEventListener('keydown', (event) => {
@@ -1490,6 +1530,7 @@ async function replaceAllFlow() {
     root: S.root, query, replacement,
     caseSensitive: $('searchCase').classList.contains('active'),
     wholeWord: $('searchWord').classList.contains('active'),
+    useRegex: $('searchRegex').classList.contains('active'),
     excludes: PB.splitExcludes(settings().excludes)
   };
   let preview;
@@ -1569,10 +1610,16 @@ async function runSearch() {
       root: S.root, query,
       caseSensitive: $('searchCase').classList.contains('active'),
       wholeWord: $('searchWord').classList.contains('active'),
+      useRegex: $('searchRegex').classList.contains('active'),
       excludes: PB.splitExcludes(settings().excludes),
       maxResults: 800
     });
     if (token !== S.searchToken) return;
+    if (res.error) {
+      $('searchSummary').textContent = 'Invalid pattern.';
+      $('searchResults').replaceChildren(el('div', 'search-empty', res.error));
+      return;
+    }
     renderSearchResults(res, query);
   } catch (err) {
     if (token !== S.searchToken) return;
@@ -1581,10 +1628,38 @@ async function runSearch() {
   }
 }
 
+function searchMatchRanges(text, query, useRegex, caseSensitive, wholeWord) {
+  const ranges = [];
+  if (!query) return ranges;
+  if (useRegex) {
+    let re;
+    try { re = new RegExp(query, caseSensitive ? 'g' : 'gi'); } catch { return ranges; }
+    let m = re.exec(text);
+    while (m) {
+      if (m[0].length) ranges.push([m.index, m[0].length]);
+      else re.lastIndex++;
+      m = re.exec(text);
+    }
+    return ranges;
+  }
+  const hay = caseSensitive ? text : text.toLowerCase();
+  const needle = caseSensitive ? query : query.toLowerCase();
+  let start = 0, index = hay.indexOf(needle);
+  while (index >= 0) {
+    if (!wholeWord || PB.boundaryMatch(text, index, needle.length)) ranges.push([index, needle.length]);
+    start = index + Math.max(1, needle.length);
+    index = hay.indexOf(needle, start);
+  }
+  return ranges;
+}
+
 function renderSearchResults(res, query) {
   const host = $('searchResults');
   host.replaceChildren();
   const hits = res.hits || [];
+  const useRegex = $('searchRegex').classList.contains('active');
+  const caseSensitive = $('searchCase').classList.contains('active');
+  const wholeWord = $('searchWord').classList.contains('active');
   if (!hits.length) {
     $('searchSummary').textContent = 'No results' + (res.truncated ? ' (search limit reached)' : '');
     host.appendChild(el('div', 'search-empty', 'No matches for "' + query + '".'));
@@ -1599,15 +1674,19 @@ function renderSearchResults(res, query) {
   for (const [file, fileHits] of groups) {
     const group = el('div', 'search-group');
     const head = el('div', 'search-file');
-    head.append(badgeFor(file), el('span', 'path', relativeToRoot(file)), el('span', 'count', String(fileHits.length)));
+    const chevron = el('span', 'search-chevron', '▾');
+    head.append(chevron, badgeFor(file), el('span', 'path', relativeToRoot(file)), el('span', 'count', String(fileHits.length)));
     head.title = file;
-    head.onclick = () => openFile(file);
+    head.onclick = () => {
+      const collapsed = group.classList.toggle('collapsed');
+      chevron.textContent = collapsed ? '▸' : '▾';
+    };
     group.appendChild(head);
     for (const hit of fileHits) {
       const row = el('div', 'search-hit');
       row.appendChild(el('span', 'line', String(hit.line)));
       const snippet = el('span', 'snippet');
-      appendHighlighted(snippet, hit.text, query, $('searchCase').classList.contains('active'));
+      appendHighlighted(snippet, hit.text, query, useRegex, caseSensitive, wholeWord);
       row.appendChild(snippet);
       row.title = hit.text;
       row.onclick = () => openFile(hit.path, hit.line, hit.column);
@@ -1617,16 +1696,14 @@ function renderSearchResults(res, query) {
   }
 }
 
-function appendHighlighted(host, text, query, caseSensitive) {
-  if (!query) { host.textContent = text; return; }
-  const hay = caseSensitive ? text : text.toLowerCase();
-  const needle = caseSensitive ? query : query.toLowerCase();
-  let start = 0, index = hay.indexOf(needle);
-  while (index >= 0) {
+function appendHighlighted(host, text, query, useRegex, caseSensitive, wholeWord) {
+  const ranges = searchMatchRanges(text, query, useRegex, caseSensitive, wholeWord);
+  if (!ranges.length) { host.textContent = text; return; }
+  let start = 0;
+  for (const [index, length] of ranges) {
     if (index > start) host.appendChild(document.createTextNode(text.slice(start, index)));
-    host.appendChild(el('mark', null, text.slice(index, index + query.length)));
-    start = index + query.length;
-    index = hay.indexOf(needle, start);
+    host.appendChild(el('mark', null, text.slice(index, index + length)));
+    start = index + length;
   }
   if (start < text.length) host.appendChild(document.createTextNode(text.slice(start)));
 }
@@ -3180,6 +3257,8 @@ function commandList() {
     { id: 'file.saveAll', label: 'File: Save All', key: 'Ctrl+Alt+S', run: () => saveAll() },
     { id: 'file.close', label: 'File: Close Editor', key: 'Ctrl+W', run: () => closeEntry(currentEntry()) },
     { id: 'file.closeAll', label: 'File: Close All Editors', run: () => closeAll() },
+    { id: 'file.compare', label: 'File: Compare Files…', run: () => compareFilesFlow() },
+    { id: 'file.insertSnippet', label: 'Editor: Insert Snippet…', run: () => insertSnippetFlow() },
     { id: 'view.explorer', label: 'View: Explorer', key: 'Ctrl+Shift+E', run: () => showView('explorer') },
     { id: 'view.search', label: 'View: Search', key: 'Ctrl+Shift+F', run: () => showView('search') },
     { id: 'view.replace', label: 'Search: Replace in Files…', key: 'Ctrl+Shift+H', run: () => openWorkspaceReplace() },
@@ -3342,6 +3421,61 @@ function syncSplitModel() {
   try { S.editor2.setModel(entry.model); } catch (err) { /* model may be disposed */ }
 }
 
+/* ---------------- compare files (diff view) ---------------- */
+
+async function compareFilesFlow() {
+  try {
+    const originals = await api.file.openDialog();
+    if (!originals || !originals.length) return;
+    const modified = await api.file.openDialog();
+    if (!modified || !modified.length) return;
+    await openCompare(originals[0], modified[0]);
+  } catch (err) { toast(err.message, 'error'); }
+}
+
+async function openCompare(originalPath, modifiedPath) {
+  let a, b;
+  try { a = await api.file.read(originalPath); }
+  catch (err) { toast('Could not read ' + nameOf(originalPath) + ': ' + err.message, 'error', 5000); return; }
+  try { b = await api.file.read(modifiedPath); }
+  catch (err) { toast('Could not read ' + nameOf(modifiedPath) + ': ' + err.message, 'error', 5000); return; }
+  exitCompare();
+  const originalModel = monaco.editor.createModel(a.content, PB.normalizeLanguage(originalPath), monaco.Uri.parse('peabox-compare://' + encodeURIComponent(originalPath)));
+  const modifiedModel = monaco.editor.createModel(b.content, PB.normalizeLanguage(modifiedPath), monaco.Uri.parse('peabox-compare://' + encodeURIComponent(modifiedPath)));
+  S.compare = { originalModel, modifiedModel, originalPath, modifiedPath };
+  setHidden($('editor'), true);
+  setHidden($('editor2'), true);
+  setHidden($('breadcrumb'), true);
+  setHidden($('diffEditor'), false);
+  S.diffEditor = monaco.editor.createDiffEditor($('diffEditor'), Object.assign(editorOptions(), {
+    readOnly: true,
+    renderSideBySide: true,
+    originalEditable: false,
+    enableSplitViewResizing: true,
+    ignoreTrimWhitespace: false
+  }));
+  S.diffEditor.setModel({ original: originalModel, modified: modifiedModel });
+  toast('Comparing ' + nameOf(originalPath) + ' ↔ ' + nameOf(modifiedPath) + ' · Esc to exit', 'info', 4200);
+}
+
+function exitCompare() {
+  if (!S.compare) return;
+  const compare = S.compare;
+  S.compare = null;
+  try { if (S.diffEditor) S.diffEditor.dispose(); } catch { /* ignore */ }
+  S.diffEditor = null;
+  try { compare.originalModel.dispose(); } catch { /* ignore */ }
+  try { compare.modifiedModel.dispose(); } catch { /* ignore */ }
+  setHidden($('diffEditor'), true);
+  setHidden($('editor'), false);
+  setHidden($('breadcrumb'), !currentEntry());
+  const entry = currentEntry();
+  if (entry) {
+    S.editor.setModel(entry.model);
+    S.editor.focus();
+  }
+}
+
 function applyTextTransform(id) {
   const entry = currentEntry();
   if (!entry) { toast('Open a file to transform.', 'warn'); return; }
@@ -3355,6 +3489,81 @@ function applyTextTransform(id) {
   entry.model.pushEditOperations([], [{ range, text: result.text, forceMoveMarkers: true }], () => null);
   entry.model.pushStackElement();
   toast('Transformed ' + nameOf(entry.path), 'success', 1800);
+}
+
+/* ---------------- snippets ---------------- */
+
+async function insertSnippetFlow() {
+  const entry = currentEntry();
+  if (!entry || !S.editor) { toast('Open a file to insert a snippet.', 'warn'); return; }
+  if (entry.virtual) { toast('This editor is read-only.', 'warn'); return; }
+  const langId = entry.model.getLanguageId();
+  let snippets = PB.snippetsFor(langId);
+  if (!snippets.length && entry.path) snippets = PB.snippetsFor(PB.extname(entry.path));
+  if (!snippets.length) { toast('No snippets available for ' + languageLabel(entry) + '.', 'info', 2500); return; }
+
+  const body = el('div');
+  const filter = el('input', 'modal-input');
+  filter.type = 'text';
+  filter.placeholder = 'Filter snippets…';
+  filter.spellcheck = false;
+  body.appendChild(filter);
+  const list = el('div', 'modal-list snippet-list');
+  body.appendChild(list);
+
+  const picked = await showModal({
+    title: 'Insert Snippet',
+    body,
+    actions: [{ label: 'Cancel', value: null }],
+    onReady: ({ finish }) => {
+      const renderItems = (query) => {
+        list.replaceChildren();
+        const q = (query || '').toLowerCase();
+        const matches = snippets.filter((s) => !q || s.name.toLowerCase().includes(q));
+        if (!matches.length) { list.appendChild(el('div', 'modal-note', 'No matching snippets.')); return; }
+        matches.forEach((snippet) => {
+          const item = el('div', 'modal-item');
+          item.appendChild(el('div', 'mi-title', snippet.name));
+          item.appendChild(el('div', 'mi-sub', snippet.body.split('\n')[0].slice(0, 90)));
+          item.tabIndex = 0;
+          item.setAttribute('role', 'option');
+          item.onclick = () => finish(snippet);
+          item.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); finish(snippet); } };
+          list.appendChild(item);
+        });
+      };
+      filter.addEventListener('input', () => renderItems(filter.value));
+      filter.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          const first = list.querySelector('.modal-item');
+          if (first) first.click();
+        }
+      });
+      renderItems('');
+      setTimeout(() => filter.focus(), 30);
+    }
+  });
+  if (picked) insertSnippet(picked);
+}
+
+function insertSnippet(snippet) {
+  const entry = currentEntry();
+  if (!entry || !S.editor) return;
+  const before = entry.model.getValue();
+  try {
+    S.editor.focus();
+    S.editor.trigger('peabox', 'editor.action.insertSnippet', { snippet: snippet.body });
+  } catch { /* fall through to plain insert */ }
+  if (entry.model.getValue() === before) {
+    // Fallback: strip tabstops/placeholders and insert as plain text.
+    const plain = snippet.body
+      .replace(/\$\{\d+:([^}]*)\}/g, '$1')
+      .replace(/\$\d+/g, '');
+    const pos = S.editor.getPosition();
+    S.editor.executeEdits('peabox-snippets', [{ range: new monaco.Range(pos.lineNumber, pos.column, pos.lineNumber, pos.column), text: plain, forceMoveMarkers: true }]);
+  }
+  persistSoon();
 }
 
 function editorAction(id, args) {
@@ -4007,6 +4216,8 @@ function handleMenuCommand(payload) {
     'workbench.nextEditor': () => cycleTabs(1),
     'workbench.prevEditor': () => cycleTabs(-1),
     'workbench.reopenClosed': () => reopenClosedEditor(),
+    'file.compare': () => compareFilesFlow(),
+    'file.insertSnippet': () => insertSnippetFlow(),
     'app.settings': () => openSettings(),
     'app.shortcuts': () => showShortcuts(),
     'palette.commands': () => openPalette('commands'),
@@ -4067,10 +4278,67 @@ function isTypingTarget(target) {
   return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || target.isContentEditable;
 }
 
+/* ---------------- external drag & drop (from OS file explorer) ---------------- */
+
+function isFileDrag(event) {
+  return event.dataTransfer && Array.from(event.dataTransfer.types || []).includes('Files');
+}
+
+function wireExternalDragDrop() {
+  let depth = 0;
+  document.addEventListener('dragenter', (event) => {
+    if (!isFileDrag(event)) return;
+    event.preventDefault();
+    depth++;
+    document.body.classList.add('drop-overlay');
+  });
+  document.addEventListener('dragover', (event) => {
+    if (!isFileDrag(event)) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'copy';
+  });
+  document.addEventListener('dragleave', (event) => {
+    if (!isFileDrag(event)) return;
+    depth = Math.max(0, depth - 1);
+    if (!depth) document.body.classList.remove('drop-overlay');
+  });
+  document.addEventListener('drop', (event) => {
+    depth = 0;
+    document.body.classList.remove('drop-overlay');
+    if (!isFileDrag(event)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const files = Array.from(event.dataTransfer.files || []);
+    if (!files.length) return;
+    handleDroppedFiles(files);
+  });
+}
+
+async function handleDroppedFiles(files) {
+  for (const file of files) {
+    const path = file.path;
+    if (!path) { toast('Could not determine the dropped file path.', 'warn', 3000); continue; }
+    try {
+      const st = await api.file.stat(path);
+      if (st.isDirectory) {
+        await openWorkspacePath(path);
+        showView('explorer');
+      } else if (st.isFile) {
+        await openFile(path);
+      } else {
+        toast('Unsupported drop target: ' + nameOf(path), 'warn', 3000);
+      }
+    } catch (err) {
+      toast('Could not open dropped item: ' + err.message, 'error', 4000);
+    }
+  }
+}
+
 function onKeyDown(event) {
   if (S.modalOpen) return;
   if (event.key === 'Escape') {
     if (S.palette.open) { closePalette(); return; }
+    if (S.compare) { exitCompare(); return; }
     hideContextMenu();
     return;
   }
@@ -4215,6 +4483,7 @@ function bindEvents() {
   $('gitStatus').onclick = () => showView('git');
 
   document.addEventListener('keydown', onKeyDown, true);
+  wireExternalDragDrop();
   window.addEventListener('resize', () => { if (S.activeTerminal) fitTerminal(S.activeTerminal); });
   window.addEventListener('focus', () => {
     checkExternalChangesOnFocus().catch(() => {});
