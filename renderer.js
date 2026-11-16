@@ -3986,6 +3986,7 @@ function commandList() {
     { id: 'view.zoomIn', label: 'View: Increase Editor Font Size', key: 'Ctrl+=', run: () => zoomEditor(1) },
     { id: 'view.zoomOut', label: 'View: Decrease Editor Font Size', key: 'Ctrl+-', run: () => zoomEditor(-1) },
     { id: 'view.zoomReset', label: 'View: Reset Editor Font Size', key: 'Ctrl+0', run: () => zoomEditor(0) },
+    { id: 'view.zen', label: 'View: Toggle Zen Mode', run: () => toggleZenMode() },
     { id: 'transform.json', label: 'Transform: Format JSON', run: () => applyTextTransform('format-json') },
     { id: 'transform.sort', label: 'Transform: Sort Lines Ascending', run: () => applyTextTransform('sort-lines') },
     { id: 'transform.dedupe', label: 'Transform: Remove Duplicate Lines', run: () => applyTextTransform('dedupe-lines') },
@@ -5027,6 +5028,7 @@ function handleMenuCommand(payload) {
     'view.zoomIn': () => zoomEditor(1),
     'view.zoomOut': () => zoomEditor(-1),
     'view.zoomReset': () => zoomEditor(0),
+    'view.zen': () => toggleZenMode(),
     'editor.split': () => toggleSplit(),
     'terminal.toggle': () => terminalToggle(),
     'run.start': () => runCurrent(),
@@ -5206,6 +5208,12 @@ async function stashBrowserFlow() {
   body.appendChild(list);
   await showModal({ title: 'Stash Browser', body, actions: [{ label: 'Close', value: null }] });
 }
+function toggleZenMode() {
+  document.body.classList.toggle('zen-mode');
+  const on = document.body.classList.contains('zen-mode');
+  toast(on ? 'Zen mode on (Esc to exit).' : 'Zen mode off.', 'info', 1800);
+  if (S.editor && S.editor.layout) setTimeout(() => S.editor.layout(), 50);
+}
 function isTypingTarget(target) {
   if (!target) return false;
   const tag = target.tagName;
@@ -5272,6 +5280,7 @@ function onKeyDown(event) {
   if (S.modalOpen) return;
   if (event.key === 'Escape') {
     if (S.palette.open) { closePalette(); return; }
+    if (document.body.classList.contains('zen-mode')) { toggleZenMode(); return; }
     if (S.compare) { exitCompare(); return; }
     hideContextMenu();
     return;

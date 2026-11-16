@@ -238,7 +238,12 @@ kbd {
 .search-hit .snippet { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 11.5px/1.5 Consolas, monospace; color: var(--muted); }
 .search-hit mark { background: #7a5c1c; color: #ffe89a; border-radius: 2px; padding: 0 1px; }
 [data-theme="light"] .search-hit mark { background: #ffe9a8; color: #6b4b00; }
-.search-empty { padding: 18px; color: var(--faint); text-align: center; }
+body.zen-mode .sidebar,
+body.zen-mode .panel,
+body.zen-mode .tabs,
+body.zen-mode .breadcrumb { display: none !important; }
+body.zen-mode #main { padding: 0; }
+body.zen-mode .editor { border: none; }
 
 /* debugger */
 .debug-toolbar { display: flex; align-items: center; gap: 6px; padding: 6px 10px; border-bottom: 1px solid var(--border); }
