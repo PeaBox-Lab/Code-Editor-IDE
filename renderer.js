@@ -3770,6 +3770,7 @@ function showPanel(panelName) {
   setHidden($('outputPane'), S.panel !== 'outputPane');
   setHidden($('problemsPane'), S.panel !== 'problemsPane');
   setHidden($('debugPane'), S.panel !== 'debugPane');
+  setHidden($('notesPane'), S.panel !== 'notesPane');
   updateRunInput();
   if (S.panel === 'terminalPane' && S.activeTerminal) setTimeout(() => fitTerminal(S.activeTerminal), 30);
 }
@@ -5446,6 +5447,15 @@ function bindEvents() {
   $('closePanel').onclick = () => $('panel').classList.add('hidden');
   $('panelBtn').onclick = () => togglePanel();
   $('gitStatus').onclick = () => showView('git');
+  const notesArea = $('notesArea');
+  if (notesArea) {
+    notesArea.value = (S.state && S.state.notes) || '';
+    notesArea.addEventListener('input', () => {
+      if (!S.state) S.state = PB.defaultState();
+      S.state.notes = notesArea.value;
+      persistSoon();
+    });
+  }
   $('envStatus').onclick = () => cycleEnv();
 
   document.addEventListener('keydown', onKeyDown, true);
@@ -5568,6 +5578,8 @@ async function boot() {
   applyLayout();
   applyEnv();
   renderRecent();
+  const na = $('notesArea');
+  if (na) na.value = (S.state && S.state.notes) || '';
   showWelcome(true);
 
   initMonaco();

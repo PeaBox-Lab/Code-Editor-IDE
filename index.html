@@ -213,6 +213,7 @@
             <button class="panel-tab active" data-panel="terminalPane"><svg class="icon"><use href="#i-terminal"></use></svg> TERMINAL</button>
             <button class="panel-tab" data-panel="outputPane"><svg class="icon"><use href="#i-output"></use></svg> OUTPUT</button>
             <button class="panel-tab" data-panel="problemsPane"><svg class="icon"><use href="#i-warning"></use></svg> PROBLEMS</button>
+            <button class="panel-tab" data-panel="notesPane"><svg class="icon"><use href="#i-file"></use></svg> NOTES</button>
             <button class="panel-tab" data-panel="debugPane"><svg class="icon"><use href="#i-play"></use></svg> DEBUG</button>
           </div>
           <div class="panel-actions">
@@ -235,6 +236,9 @@
         </form>
         <div id="problemsPane" class="panel-pane hidden">
           <div id="problemsList" class="problems-list"></div>
+        </div>
+        <div id="notesPane" class="panel-pane hidden">
+          <textarea id="notesArea" class="notes-area" placeholder="Scratchpad notes for this workspace…"></textarea>
         </div>
         <div id="debugPane" class="panel-pane hidden">
           <div id="debugToolbar" class="debug-toolbar">

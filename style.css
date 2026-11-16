@@ -675,3 +675,5 @@ button.primary:hover { filter: brightness(1.08); }
 .ai-settings-body { display: flex; flex-direction: column; gap: 2px; }
 .ai-settings-body hr { border: 0; border-top: 1px solid var(--border); margin: 10px 0; }
 .ai-settings-body .desc { font-size: 10.5px; color: var(--faint); }
+
+.notes-area { width: 100%; height: 100%; resize: none; border: none; background: var(--bg); color: var(--text); padding: 10px; font: 13px/1.5 Consolas, monospace; }
