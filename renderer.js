@@ -4542,6 +4542,21 @@ function jumpToSymbol(symbol) {
   sessionSoon();
 }
 
+function computeCodeMetrics(text) {
+  const lines = String(text || '').split(/\r?\n/);
+  let code = 0, blank = 0, comments = 0, functions = 0, complexity = 1;
+  for (const line of lines) {
+    const t = line.trim();
+    if (!t) { blank++; continue; }
+    if (/^(\/\/|#|\/\*|\*|<!--)/.test(t)) { comments++; continue; }
+    code++;
+    if (/\bfunction\b|\bdef\b|\bfn\b|=>/.test(t)) functions++;
+    const keywords = t.match(/\b(if|for|while|case|catch|&&|\|\||\?)\b/g);
+    if (keywords) complexity += keywords.length;
+  }
+  return { total: lines.length, code, blank, comments, functions, complexity };
+}
+
 function refreshOutline() {
   const host = $('outlineTree');
   host.replaceChildren();
@@ -4554,16 +4569,21 @@ function refreshOutline() {
   const symbols = PB.extractDocumentSymbols(entry.model.getValue(), ext);
   if (!symbols.length) {
     host.appendChild(el('div', 'tree empty', 'No symbols found in this file.'));
-    return;
+  } else {
+    for (const sym of symbols) {
+      const row = el('div', 'outline-item');
+      row.appendChild(el('span', 'outline-kind ' + (sym.kind || ''), (sym.kind || 'sym').slice(0, 2).toUpperCase()));
+      row.appendChild(el('span', 'outline-name', sym.name));
+      row.title = sym.name + '  (line ' + sym.line + ')';
+      row.onclick = () => jumpToSymbol(sym);
+      host.appendChild(row);
+    }
   }
-  for (const sym of symbols) {
-    const row = el('div', 'outline-item');
-    row.appendChild(el('span', 'outline-kind ' + (sym.kind || ''), (sym.kind || 'sym').slice(0, 2).toUpperCase()));
-    row.appendChild(el('span', 'outline-name', sym.name));
-    row.title = sym.name + '  (line ' + sym.line + ')';
-    row.onclick = () => jumpToSymbol(sym);
-    host.appendChild(row);
-  }
+  // Code metrics footer.
+  const metrics = computeCodeMetrics(entry.model.getValue());
+  const footer = el('div', 'outline-metrics');
+  footer.textContent = 'Lines: ' + metrics.total + '  Code: ' + metrics.code + '  Comments: ' + metrics.comments + '  Blank: ' + metrics.blank + '  Fns: ' + metrics.functions + '  Complexity: ' + metrics.complexity;
+  host.appendChild(footer);
 }
 
 function symbolPaletteItems(query) {
