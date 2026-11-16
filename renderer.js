@@ -50,6 +50,8 @@ const S = {
   navNavigating: false,
   recentlyClosed: [],
   blameCache: new Map(),
+  inlineBlame: false,
+  inlineBlameIds: null,
   breakpoints: new Map(),
   debug: null,
   compare: null,
@@ -1184,6 +1186,7 @@ function activateEntry(key) {
   scheduleGitGutter(entry);
   wireBlameHover(entry.model.getLanguageId());
   scheduleBlameFetch(entry);
+  if (S.inlineBlame) applyInlineBlame(entry);
 }
 
 function openVirtual(label, content) {
@@ -1908,6 +1911,59 @@ function blameForLine(entry, line) {
     else hi = mid - 1;
   }
   return null;
+}
+
+async function toggleInlineBlame() {
+  S.inlineBlame = !S.inlineBlame;
+  if (S.inlineBlame) {
+    await applyInlineBlame(currentEntry());
+    toast('Inline blame enabled.', 'info', 1600);
+  } else {
+    clearInlineBlame();
+    toast('Inline blame disabled.', 'info', 1600);
+  }
+}
+
+async function applyInlineBlame(entry) {
+  if (!entry || entry.virtual || !entry.path || !S.editor || S.editor.getModel() !== entry.model) return;
+  clearInlineBlame();
+  if (!S.blameCache.has(entry.path)) {
+    try {
+      const res = await api.git.blame({ cwd: S.root, file: entry.path });
+      if (res && res.ok) {
+        const records = PB.parseGitBlame(res.stdout || '');
+        if (records.length) S.blameCache.set(entry.path, records);
+      }
+    } catch { /* blame unavailable */ }
+  }
+  const records = S.blameCache.get(entry.path);
+  if (!records || !records.length) return;
+  const decorations = [];
+  for (let line = 1; line <= entry.model.getLineCount(); line++) {
+    const rec = blameForLine(entry, line);
+    if (!rec) continue;
+    const when = rec.time ? new Date(rec.time * 1000) : null;
+    const whenText = when ? PB.relativeTime(when.getTime()) : '';
+    const label = (rec.author || 'Unknown') + (whenText ? ' · ' + whenText : '');
+    decorations.push({
+      range: new monaco.Range(line, 1, line, 1),
+      options: {
+        after: { content: '  ' + label, inlineClassName: 'inline-blame' },
+        isWholeLine: false
+      }
+    });
+  }
+  try { S.inlineBlameIds = entry.model.deltaDecorations([], decorations); } catch { S.inlineBlameIds = null; }
+}
+
+function clearInlineBlame() {
+  for (const entry of S.models.values()) {
+    if (entry.inlineBlameIds && entry.model) {
+      try { entry.model.deltaDecorations(entry.inlineBlameIds, []); } catch { /* ignore */ }
+      entry.inlineBlameIds = null;
+    }
+  }
+  S.inlineBlameIds = null;
 }
 
 function wireBlameHover(lang) {
@@ -3952,6 +4008,7 @@ function commandList() {
     { id: 'git.newBranch', label: 'Git: Create Branch…', run: () => createBranch() },
     { id: 'git.deleteBranch', label: 'Git: Delete Branch…', run: () => deleteBranchFlow() },
     { id: 'git.amend', label: 'Git: Amend Last Commit…', run: () => amendCommitFlow() },
+    { id: 'git.inlineBlame', label: 'Git: Toggle Inline Blame', run: () => toggleInlineBlame() },
     { id: 'run.start', label: 'Run: Run Current File', key: 'F5', run: () => runCurrent() },
     { id: 'run.stop', label: 'Run: Stop', key: 'Shift+F5', run: () => stopRun() },
     { id: 'debug.start', label: 'Debug: Start Debugging…', run: () => startDebugFlow() },
@@ -4947,7 +5004,8 @@ function handleMenuCommand(payload) {
     'editor.renameSymbol': () => renameSymbolLsp(),
     'git.newBranch': () => createBranch(),
     'git.deleteBranch': () => deleteBranchFlow(),
-    'git.amend': () => amendCommitFlow()
+    'git.amend': () => amendCommitFlow(),
+    'git.inlineBlame': () => toggleInlineBlame()
   };
   const fn = map[id];
   if (fn) fn();

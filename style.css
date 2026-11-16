@@ -264,6 +264,7 @@ kbd {
 .peabox-breakpoint::before { content: ''; display: block; width: 9px; height: 9px; margin: 4px 0 0 4px; border-radius: 50%; background: #e5534b; }
 .peabox-paused-line { background: rgba(229, 175, 58, 0.18); }
 .peabox-paused-arrow::before { content: '▶'; color: #e5af3a; font-size: 9px; line-height: 18px; margin-left: 2px; }
+.inline-blame { color: var(--faint); font-style: italic; font-size: 11px; margin-left: 14px; }
 
 /* external drag-drop overlay */
 body.drop-overlay::after {
