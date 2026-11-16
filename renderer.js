@@ -4146,7 +4146,8 @@ function commandList() {
     { id: 'lsp.start', label: 'Language Servers: Start…', run: () => openLspStart() },
     { id: 'lsp.wire', label: 'Language Servers: Wire to Current Editor', run: () => wireLspToEditor() },
     { id: 'ai.settings', label: 'AI: Open AI Settings', run: () => openAiSettings() },
-    { id: 'ai.chat', label: 'AI: Chat', run: () => openAiChat() }
+    { id: 'ai.chat', label: 'AI: Chat', run: () => openAiChat() },
+    { id: 'docs.generate', label: 'Docs: Generate README (AI)', run: () => generateDocsFlow() }
   ];
 }
 
@@ -5338,6 +5339,52 @@ function applyEnv() {
   const env = s.env || 'development';
   const el = $('envStatus');
   if (el) { el.textContent = env; el.title = 'Environment: ' + env + ' (click to cycle)'; }
+}
+async function generateDocsFlow() {
+  if (!S.root) { toast('Open a folder first.', 'warn'); return; }
+  const provider = settings().ai.provider;
+  if (!provider) { toast('Configure an AI provider in Settings first.', 'warn'); return; }
+  toast('Generating documentation…', 'info', 2000);
+  // Build a compact context: file tree + package.json.
+  let tree = '';
+  try {
+    const files = await api.workspace.files({ root: S.root, max: 200 });
+    tree = (files && files.files ? files.files : []).map((f) => f.rel || f.path).join('\n');
+  } catch { tree = '(file list unavailable)'; }
+  let pkg = '';
+  try {
+    const sep = S.root.endsWith('/') || S.root.endsWith('\\') ? '' : '/';
+    const res = await api.file.read(S.root + sep + 'package.json');
+    pkg = res.content || '';
+  } catch { pkg = '(no package.json)'; }
+  const context = 'Project root: ' + S.root + '\\n\\npackage.json:\\n' + pkg.slice(0, 4000) + '\\n\\nFile tree:\\n' + tree.slice(0, 6000);
+  const question = 'Generate a complete, well-structured README.md for this project. Include: title, description, features, installation, usage, project structure, and license placeholder. Return only the markdown content, no commentary.';
+  let res;
+  try { res = await api.ai.chat({ provider, question, context }); }
+  catch (err) { toast('AI request failed: ' + err.message, 'error', 6000); return; }
+  if (!res || !res.ok || !res.text) { toast((res && res.error) || 'No response from AI.', 'error', 6000); return; }
+
+  const body = el('div');
+  const preview = el('pre', 'markdown-preview');
+  preview.textContent = res.text;
+  body.appendChild(preview);
+
+  const answer = await showModal({
+    title: 'Generated README.md',
+    body,
+    actions: [
+      { label: 'Cancel', value: null },
+      { label: 'Create README.md', value: 'create', class: 'primary' }
+    ]
+  });
+  if (answer !== 'create') return;
+  const sep = S.root.endsWith('/') || S.root.endsWith('\\') ? '' : '/';
+  const target = S.root + sep + 'README.md';
+  try {
+    await api.file.write(target, res.text);
+    toast('Created README.md', 'success', 2200);
+    await openFile(target);
+  } catch (err) { toast('Could not write README.md: ' + err.message, 'error', 6000); }
 }
 function isTypingTarget(target) {
   if (!target) return false;
