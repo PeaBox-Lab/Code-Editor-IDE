@@ -5190,6 +5190,29 @@ function bindSubscriptions() {
   api.on.terminalData(onTerminalData);
   api.on.terminalExit(onTerminalExit);
   api.on.closeRequest(() => { handleCloseRequest().catch(() => {}); });
+  api.on.lspDiagnostics((payload) => {
+    if (!payload || !Array.isArray(payload.diagnostics)) return;
+    const file = uriToFile(payload.uri);
+    const mapped = payload.diagnostics.map((d) => ({
+      severity: (d.severity === 2 || d.severity === 'warning') ? 'warning' : 'error',
+      message: d.message || 'Problem',
+      file: file || null,
+      line: ((d.range && d.range.start && d.range.start.line) || 0) + 1,
+      column: ((d.range && d.range.start && d.range.start.character) || 0) + 1
+    }));
+    // Replace diagnostics for this file (keep others).
+    S.problems = (S.problems || []).filter((p) => !file || p.file !== file);
+    S.problems = S.problems.concat(mapped);
+    if (S.panel === 'problemsPane') renderProblems(S.problems);
+  });
+}
+
+function uriToFile(uri) {
+  if (!uri) return null;
+  if (uri.startsWith('file://')) {
+    try { return decodeURIComponent(uri.replace('file://', '').replace(/^\/([A-Za-z]:)/, '$1')); } catch { return uri.replace('file://', ''); }
+  }
+  return uri;
 }
 
 async function restoreSession() {
