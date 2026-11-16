@@ -3961,6 +3961,7 @@ function commandList() {
     { id: 'file.close', label: 'File: Close Editor', key: 'Ctrl+W', run: () => closeEntry(currentEntry()) },
     { id: 'file.closeAll', label: 'File: Close All Editors', run: () => closeAll() },
     { id: 'file.compare', label: 'File: Compare Files…', run: () => compareFilesFlow() },
+    { id: 'git.compareBranches', label: 'Git: Compare Branches…', run: () => compareBranchesFlow() },
     { id: 'view.markdownPreview', label: 'View: Markdown Preview', run: () => openMarkdownPreview() },
     { id: 'file.insertSnippet', label: 'Editor: Insert Snippet…', run: () => insertSnippetFlow() },
     { id: 'view.explorer', label: 'View: Explorer', key: 'Ctrl+Shift+E', run: () => showView('explorer') },
@@ -4148,6 +4149,65 @@ async function compareFilesFlow() {
     if (!modified || !modified.length) return;
     await openCompare(originals[0], modified[0]);
   } catch (err) { toast(err.message, 'error'); }
+}
+
+async function compareBranchesFlow() {
+  if (!S.root) { toast('Open a folder first.', 'warn'); return; }
+  let branches, current;
+  try {
+    const res = await api.git.branches(S.root);
+    branches = res.branches || [];
+    current = res.current || '';
+  } catch (err) { toast(err.message, 'error'); return; }
+  if (branches.length < 2) { toast('Need at least two branches to compare.', 'info', 2500); return; }
+
+  const body = el('div');
+  body.appendChild(el('p', null, 'Compare two branches and see changed files.'));
+  const row1 = el('div', 'modal-row');
+  row1.appendChild(el('label', 'modal-note', 'Base'));
+  const baseSelect = el('select', 'modal-input');
+  branches.forEach((b) => { const o = el('option', null, b); o.value = b; if (b === current) o.selected = true; baseSelect.appendChild(o); });
+  row1.appendChild(baseSelect);
+  const row2 = el('div', 'modal-row');
+  row2.appendChild(el('label', 'modal-note', 'Head'));
+  const headSelect = el('select', 'modal-input');
+  branches.forEach((b) => { const o = el('option', null, b); o.value = b; if (b !== current) o.selected = true; headSelect.appendChild(o); });
+  row2.appendChild(headSelect);
+  body.append(row1, row2);
+
+  const answer = await showModal({
+    title: 'Compare Branches',
+    body,
+    actions: [{ label: 'Cancel', value: null }, { label: 'Compare', value: 'compare', class: 'primary' }]
+  });
+  if (answer !== 'compare') return;
+  const base = baseSelect.value;
+  const head = headSelect.value;
+  if (base === head) { toast('Choose two different branches.', 'warn'); return; }
+
+  let res;
+  try { res = await api.git.diffBranches({ cwd: S.root, base, head }); }
+  catch (err) { toast(err.message, 'error'); return; }
+  if (!res || !res.ok) { toast((res && res.error) || 'Could not compare branches.', 'error'); return; }
+  const files = res.files || [];
+  if (!files.length) { toast(base + ' and ' + head + ' are identical.', 'info', 2500); return; }
+
+  const listBody = el('div');
+  listBody.appendChild(el('div', 'modal-note', files.length + ' file(s) changed between ' + base + ' and ' + head + '.'));
+  const list = el('div', 'modal-list');
+  files.forEach((f) => {
+    const item = el('div', 'modal-item');
+    const badge = el('span', 'git-status-badge status-' + f.status.charAt(0).toLowerCase(), f.status.charAt(0));
+    const name = el('span', 'mi-title', f.path);
+    item.append(badge, name);
+    list.appendChild(item);
+  });
+  listBody.appendChild(list);
+  await showModal({
+    title: base + ' ↔ ' + head,
+    body: listBody,
+    actions: [{ label: 'Close', value: null }]
+  });
 }
 
 async function openCompare(originalPath, modifiedPath) {
@@ -4946,6 +5006,7 @@ function handleMenuCommand(payload) {
     'workbench.prevEditor': () => cycleTabs(-1),
     'workbench.reopenClosed': () => reopenClosedEditor(),
     'file.compare': () => compareFilesFlow(),
+    'git.compareBranches': () => compareBranchesFlow(),
     'view.markdownPreview': () => openMarkdownPreview(),
     'file.insertSnippet': () => insertSnippetFlow(),
     'app.settings': () => openSettings(),

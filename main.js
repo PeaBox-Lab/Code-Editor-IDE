@@ -956,6 +956,20 @@ ipcMain.handle('git:deleteBranch', async (_, payload) => {
   return git(dir, ['branch', force ? '-D' : '-d', check.value], 60000);
 });
 
+ipcMain.handle('git:diffBranches', async (_, payload) => {
+  const dir = registeredRoot(payload && payload.cwd);
+  const base = String(payload && payload.base || '').trim();
+  const head = String(payload && payload.head || '').trim();
+  if (!base || !head) return { ok: false, error: 'Both base and head are required.' };
+  const res = await git(dir, ['diff', '--name-status', base + '...' + head], 60000);
+  if (!res.ok) return { ok: false, error: res.text || 'git diff failed.' };
+  const files = (res.stdout || '').split(/\r?\n/).filter(Boolean).map((line) => {
+    const parts = line.split(/\t/);
+    return { status: parts[0].trim(), path: parts[parts.length - 1].trim() };
+  });
+  return { ok: true, files };
+});
+
 ipcMain.handle('git:diffLines', async (_, payload) => {
   const dir = registeredRoot(payload && payload.cwd);
   const file = String(payload && payload.file || '');
