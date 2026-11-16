@@ -381,6 +381,49 @@
     return records;
   }
 
+  /**
+   * Parses `git diff -U0 --no-color HEAD -- <file>` output into per-line gutter marks.
+   * Within a hunk, paired delete/add runs become 'mod'; unpaired adds 'add';
+   * leftover deletions collapse into a single 'del' marker with a count.
+   * @param {string} patch - Raw unified diff text.
+   * @returns {Array<{line:number, type:'add'|'mod'|'del', count?:number}>}
+   */
+  function parseDiffHunks(patch) {
+    var marks = [];
+    var lines = str(patch).split(/\r?\n/);
+    var newLine = 0;
+    var pendingDels = 0;
+    var inHunk = false;
+    for (var i = 0; i < lines.length; i++) {
+      var raw = lines[i];
+      if (raw.charAt(0) === '@') {
+        var m = raw.match(/^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@/);
+        if (m) {
+          if (pendingDels > 0 && newLine > 0) marks.push({ line: newLine, type: 'del', count: pendingDels });
+          pendingDels = 0;
+          newLine = Number(m[1]) || 0;
+          inHunk = true;
+        }
+        continue;
+      }
+      if (!inHunk) continue;
+      var c = raw.charAt(0);
+      if (c === '+') {
+        var type = pendingDels > 0 ? 'mod' : 'add';
+        if (pendingDels > 0) pendingDels--;
+        marks.push({ line: newLine, type: type });
+        newLine++;
+      } else if (c === '-') {
+        pendingDels++;
+      } else if (c === ' ' || raw === '') {
+        if (pendingDels > 0) { marks.push({ line: newLine, type: 'del', count: pendingDels }); pendingDels = 0; }
+        newLine++;
+      }
+    }
+    if (pendingDels > 0 && newLine > 0) marks.push({ line: newLine, type: 'del', count: pendingDels });
+    return marks;
+  }
+
   function isWordChar(ch) { return !!ch && /[A-Za-z0-9_]/.test(ch); }
 
   function boundaryMatch(line, index, length) {
@@ -1432,6 +1475,7 @@
     parseGitStatusPorcelain: parseGitStatusPorcelain,
     parseGitLog: parseGitLog,
     parseGitBlame: parseGitBlame,
+    parseDiffHunks: parseDiffHunks,
     parseGitHunks: parseGitHunks,
     buildHunkPatch: buildHunkPatch,
     boundaryMatch: boundaryMatch,

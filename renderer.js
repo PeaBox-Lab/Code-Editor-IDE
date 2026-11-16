@@ -49,6 +49,7 @@ const S = {
   navIndex: -1,
   navNavigating: false,
   recentlyClosed: [],
+  blameCache: new Map(),
   compare: null,
   diffEditor: null,
   dragKey: null,
@@ -645,6 +646,7 @@ async function loadWorkspace(tree, options) {
   S.navHistory = [];
   S.navIndex = -1;
   S.recentlyClosed = [];
+  S.blameCache.clear();
   exitCompare();
   $('workspace').textContent = S.root;
   $('workspace').title = S.root;
@@ -1167,6 +1169,9 @@ function activateEntry(key) {
   persistSoon();
   refreshOutline();
   sessionSoon();
+  scheduleGitGutter(entry);
+  wireBlameHover(entry.model.getLanguageId());
+  scheduleBlameFetch(entry);
 }
 
 function openVirtual(label, content) {
@@ -1234,6 +1239,7 @@ function bindModel(entry) {
       if (!entry.dirty || entry.virtual) return;
       api.recovery.save({ file: entry.path, content: entry.model.getValue() }).catch(() => {});
     }, 650);
+    scheduleGitGutter(entry);
   });
 }
 
@@ -1772,6 +1778,128 @@ async function refreshGit() {
     S.gitBusy = false;
     if (S.gitPending) { S.gitPending = false; setTimeout(() => refreshGit(), 80); }
   }
+  scheduleGitGutter(currentEntry());
+}
+
+/* ---------------- git gutter + inline blame ---------------- */
+
+function gitRelativePath(path) {
+  if (!S.root || !path) return '';
+  return PB.normalizePath(relativeToRoot(path));
+}
+
+function scheduleGitGutter(entry) {
+  if (!entry || entry.virtual || !entry.path || !S.root || !S.git || !S.git.repo) return;
+  clearTimeout(entry.gutterTimer);
+  entry.gutterTimer = setTimeout(() => updateGitGutter(entry), 300);
+}
+
+async function updateGitGutter(entry) {
+  if (!entry || entry.virtual || !entry.path || !S.root) return;
+  if (!S.editor || S.editor.getModel() !== entry.model) return;
+  const token = (entry.gutterToken || 0) + 1;
+  entry.gutterToken = token;
+  let marks = [];
+  try {
+    const rel = gitRelativePath(entry.path);
+    const code = S.gitFiles[rel] || S.gitFiles[rel.toLowerCase()] || null;
+    if (code === 'U' || code === 'A') {
+      const lineCount = entry.model.getLineCount();
+      for (let i = 1; i <= lineCount; i++) marks.push({ line: i, type: 'add' });
+    } else if (code) {
+      const res = await api.git.diffLines({ cwd: S.root, file: entry.path });
+      if (token !== entry.gutterToken) return;
+      if (res && res.ok) marks = res.marks || [];
+    }
+  } catch { marks = []; }
+  if (token !== entry.gutterToken) return;
+  applyGitGutter(entry, marks);
+}
+
+function applyGitGutter(entry, marks) {
+  if (!entry || !S.editor || S.editor.getModel() !== entry.model) return;
+  const ruler = {
+    add: 'rgba(87,166,74,0.55)',
+    mod: 'rgba(48,133,203,0.55)',
+    del: 'rgba(190,80,70,0.55)'
+  };
+  const decorations = (marks || []).map((m) => ({
+    range: new monaco.Range(m.line, 1, m.line, 1),
+    options: {
+      isWholeLine: false,
+      glyphMarginClassName: 'git-gutter-' + m.type,
+      glyphMarginHoverMessage: {
+        value: m.type === 'del'
+          ? (m.count || 1) + ' line' + ((m.count || 1) === 1 ? '' : 's') + ' deleted here'
+          : (m.type === 'add' ? 'Added line' : 'Modified line') + ' (vs HEAD)'
+      },
+      overviewRuler: { color: ruler[m.type], position: monaco.editor.OverviewRulerLane.Left },
+      minimap: null
+    }
+  }));
+  const old = entry.gutterIds || [];
+  try {
+    entry.gutterIds = entry.model.deltaDecorations(old, decorations);
+  } catch { entry.gutterIds = []; }
+}
+
+let blameHoverWired = new Set();
+let blameFetchTimer = null;
+
+function scheduleBlameFetch(entry) {
+  clearTimeout(blameFetchTimer);
+  blameFetchTimer = setTimeout(() => fetchBlame(entry), 350);
+}
+
+async function fetchBlame(entry) {
+  if (!entry || entry.virtual || !entry.path || !S.root || !S.git || !S.git.repo) return;
+  const rel = gitRelativePath(entry.path);
+  if (!S.gitFiles[rel] && !S.gitFiles[rel.toLowerCase()]) {
+    // Untracked by status? Still may be tracked; only skip when explicitly untracked.
+    if (S.gitFiles[rel] === 'U' || S.gitFiles[rel.toLowerCase()] === 'U') return;
+  }
+  try {
+    const res = await api.git.blame({ cwd: S.root, file: entry.path });
+    if (!res || !res.ok) return;
+    const records = PB.parseGitBlame(res.stdout || '');
+    if (records.length) S.blameCache.set(entry.path, records);
+    else S.blameCache.delete(entry.path);
+  } catch { /* blame unavailable */ }
+}
+
+function blameForLine(entry, line) {
+  if (!entry || !entry.path) return null;
+  const records = S.blameCache.get(entry.path);
+  if (!records || !records.length) return null;
+  let lo = 0, hi = records.length - 1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    const rec = records[mid];
+    if (rec.line === line) return rec;
+    if (rec.line < line) lo = mid + 1;
+    else hi = mid - 1;
+  }
+  return null;
+}
+
+function wireBlameHover(lang) {
+  if (blameHoverWired.has(lang)) return;
+  blameHoverWired.add(lang);
+  monaco.languages.registerHoverProvider(lang, {
+    provideHover: (model, position) => {
+      const entry = currentEntry();
+      if (!entry || entry.model !== model) return null;
+      const rec = blameForLine(entry, position.lineNumber);
+      if (!rec) return null;
+      const when = rec.time ? new Date(rec.time * 1000) : null;
+      const whenText = when ? PB.relativeTime(when.getTime()) : 'unknown time';
+      const lines = [
+        '**' + (rec.author || 'Unknown') + '** · ' + whenText,
+        '`' + rec.hash.slice(0, 8) + '` ' + (rec.text || '').slice(0, 120)
+      ];
+      return { contents: lines.map((value) => ({ value })) };
+    }
+  });
 }
 
 function renderGitNoRepo(message) {
@@ -2050,6 +2178,72 @@ async function createBranch() {
   try {
     const res = await api.git.createBranch({ cwd: S.root, branch: check.value });
     toast(res.ok ? 'Created branch ' + check.value : (res.text || 'Could not create branch'), res.ok ? 'success' : 'error', 4000);
+    await refreshGit();
+  } catch (err) { toast(err.message, 'error'); }
+}
+
+async function deleteBranchFlow() {
+  if (!S.root) { toast('Open a folder first.', 'warn'); return; }
+  let branches, current;
+  try {
+    const res = await api.git.branches(S.root);
+    branches = res.branches || [];
+    current = res.current || '';
+  } catch (err) { toast(err.message, 'error'); return; }
+  const candidates = branches.filter((b) => b !== current);
+  if (!candidates.length) { toast('No other branches to delete.', 'info', 2200); return; }
+  const body = el('div');
+  body.appendChild(el('p', null, 'Delete a branch. The current branch (' + current + ') cannot be deleted.'));
+  const list = el('div', 'modal-list');
+  const selected = { value: null };
+  candidates.forEach((branch) => {
+    const item = el('div', 'modal-item');
+    const radio = el('input');
+    radio.type = 'radio';
+    radio.name = 'delete-branch';
+    radio.value = branch;
+    radio.onchange = () => { if (radio.checked) selected.value = branch; };
+    const info = el('div', 'mi-body');
+    info.appendChild(el('div', 'mi-title', branch));
+    item.append(radio, info);
+    item.style.cursor = 'pointer';
+    item.onclick = () => { radio.checked = true; selected.value = branch; };
+    list.appendChild(item);
+  });
+  body.appendChild(list);
+  const answer = await showModal({
+    title: 'Delete Branch',
+    body,
+    actions: [
+      { label: 'Cancel', value: null },
+      { label: 'Delete', value: 'delete' },
+      { label: 'Force Delete', value: 'force' }
+    ]
+  });
+  if (!answer || !selected.value) return;
+  try {
+    const res = await api.git.deleteBranch({ cwd: S.root, branch: selected.value, force: answer === 'force' });
+    const text = (res.text || '').trim();
+    if (res.ok) toast('Deleted branch ' + selected.value + '.', 'success', 3000);
+    else toast(text || 'Could not delete branch (try Force Delete).', 'error', 5000);
+    await refreshGit();
+  } catch (err) { toast(err.message, 'error'); }
+}
+
+async function amendCommitFlow() {
+  if (!S.root) { toast('Open a folder first.', 'warn'); return; }
+  let lastSubject = '';
+  try {
+    const res = await api.git.log(S.root);
+    const commits = PB.parseGitLog(res.stdout || '');
+    if (commits.length) lastSubject = commits[0].subject || '';
+  } catch { /* unknown */ }
+  const message = await modalInput('Amend Last Commit', 'New commit message', lastSubject, 'Amend',
+    'This rewrites the most recent commit. Only do this if it has not been pushed.');
+  if (!message) return;
+  try {
+    const res = await api.git.commit({ cwd: S.root, message, amend: true });
+    toast(res.ok ? 'Commit amended.' : (res.text || 'Amend failed.'), res.ok ? 'success' : 'error', 5000);
     await refreshGit();
   } catch (err) { toast(err.message, 'error'); }
 }
@@ -3296,6 +3490,8 @@ function commandList() {
     { id: 'git.stash', label: 'Git: Stash Changes', run: () => gitBulk('stash') },
     { id: 'git.stashPop', label: 'Git: Pop Stash', run: () => gitBulk('stashPop') },
     { id: 'git.newBranch', label: 'Git: Create Branch…', run: () => createBranch() },
+    { id: 'git.deleteBranch', label: 'Git: Delete Branch…', run: () => deleteBranchFlow() },
+    { id: 'git.amend', label: 'Git: Amend Last Commit…', run: () => amendCommitFlow() },
     { id: 'run.start', label: 'Run: Run Current File', key: 'F5', run: () => runCurrent() },
     { id: 'run.stop', label: 'Run: Stop', key: 'Shift+F5', run: () => stopRun() },
     { id: 'terminal.new', label: 'Terminal: New Terminal', run: () => createTerminal() },
@@ -3375,6 +3571,7 @@ function editorOptions() {
     tabSize: settings().tabSize,
     wordWrap: settings().wordWrap ? 'on' : 'off',
     minimap: { enabled: settings().minimap },
+    glyphMargin: true,
     smoothScrolling: true,
     stickyScroll: settings().stickyScroll,
     cursorBlinking: 'smooth',
@@ -4264,7 +4461,10 @@ function handleMenuCommand(payload) {
     'editor.insertLineAfter': () => editorAction('editor.action.insertLineAfter'),
     'editor.goToDefinition': () => goToDefinition(),
     'editor.findReferences': () => findLspReferences(),
-    'editor.renameSymbol': () => renameSymbolLsp()
+    'editor.renameSymbol': () => renameSymbolLsp(),
+    'git.newBranch': () => createBranch(),
+    'git.deleteBranch': () => deleteBranchFlow(),
+    'git.amend': () => amendCommitFlow()
   };
   const fn = map[id];
   if (fn) fn();

@@ -252,6 +252,12 @@ body.drop-overlay::after {
 }
 
 /* git */
+.git-gutter-add::before { content: ''; display: block; width: 4px; height: 100%; margin-left: 4px; background: #57a64a; }
+.git-gutter-mod::before { content: ''; display: block; width: 4px; height: 100%; margin-left: 4px; background: #3085cb; }
+.git-gutter-del::before { content: '▸'; display: block; margin-left: 2px; color: #be5046; font-size: 10px; line-height: 16px; }
+[data-theme="light"] .git-gutter-add::before { background: #2da44e; }
+[data-theme="light"] .git-gutter-mod::before { background: #0969da; }
+[data-theme="light"] .git-gutter-del::before { color: #cf222e; }
 .git-summary { padding: 0 12px 8px; }
 .branch-row { display: flex; align-items: center; gap: 6px; padding: 0 10px 8px; }
 .branch-row .icon { color: var(--muted); }

@@ -513,6 +513,31 @@ test('buildHunkPatch combines file header and hunk raw text', () => {
     '+added line\n');
 });
 
+test('parseDiffHunks marks added, modified and deleted lines', () => {
+  const diff = [
+    'diff --git a/app.js b/app.js',
+    '--- a/app.js',
+    '+++ b/app.js',
+    '@@ -1,2 +1,2 @@',
+    '-old first',
+    '+new first',
+    ' context unchanged',
+    '@@ -10,0 +11,3 @@',
+    '+added one',
+    '+added two',
+    '@@ -20,2 +24,0 @@',
+    '-gone a',
+    '-gone b'
+  ].join('\n');
+  const marks = PB.parseDiffHunks(diff);
+  assert.deepEqual(marks, [
+    { line: 1, type: 'mod' },
+    { line: 11, type: 'add' },
+    { line: 12, type: 'add' },
+    { line: 24, type: 'del', count: 2 }
+  ]);
+});
+
 test('utf8ByteLength counts multi-byte characters correctly', () => {
   assert.strictEqual(PB.utf8ByteLength(''), 0);
   assert.strictEqual(PB.utf8ByteLength('abc'), 3);

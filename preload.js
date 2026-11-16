@@ -63,6 +63,8 @@ contextBridge.exposeInMainWorld('api', {
     commit: (payload) => invoke('git:commit', payload),
     switchBranch: (payload) => invoke('git:switch', payload),
     createBranch: (payload) => invoke('git:createBranch', payload),
+    deleteBranch: (payload) => invoke('git:deleteBranch', payload),
+    diffLines: (payload) => invoke('git:diffLines', payload),
     pull: (cwd) => invoke('git:pull', cwd),
     push: (cwd) => invoke('git:push', cwd),
     fetch: (cwd) => invoke('git:fetch', cwd),

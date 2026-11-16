@@ -927,7 +927,8 @@ ipcMain.handle('git:commit', async (_, payload) => {
   const message = String(payload && payload.message || '').trim();
   if (!message) throw new Error('Commit message is required.');
   if (message.length > 5000) throw new Error('Commit message is too long.');
-  return git(dir, ['commit', '-m', message], 120000);
+  const args = payload && payload.amend ? ['commit', '--amend', '-m', message] : ['commit', '-m', message];
+  return git(dir, args, 120000);
 });
 
 ipcMain.handle('git:switch', async (_, payload) => {
@@ -944,6 +945,24 @@ ipcMain.handle('git:createBranch', async (_, payload) => {
   const check = PB.validateBranchName(branch);
   if (!check.ok) throw new Error(check.error);
   return git(dir, ['switch', '-c', check.value], 60000);
+});
+
+ipcMain.handle('git:deleteBranch', async (_, payload) => {
+  const dir = registeredRoot(payload && payload.cwd);
+  const branch = String(payload && payload.branch || '').trim();
+  const check = PB.validateBranchName(branch);
+  if (!check.ok) throw new Error(check.error);
+  const force = !!(payload && payload.force);
+  return git(dir, ['branch', force ? '-D' : '-d', check.value], 60000);
+});
+
+ipcMain.handle('git:diffLines', async (_, payload) => {
+  const dir = registeredRoot(payload && payload.cwd);
+  const file = String(payload && payload.file || '');
+  if (!dir || !file) return { ok: false, marks: [], error: 'Missing cwd or file.' };
+  const res = await git(dir, ['diff', '-U0', '--no-color', 'HEAD', '--', file], 30000);
+  if (!res.ok) return { ok: false, marks: [], error: res.text || 'git diff failed.' };
+  return { ok: true, marks: PB.parseDiffHunks(res.stdout || '') };
 });
 
 ipcMain.handle('git:pull', async (_, cwd) => {
@@ -985,17 +1004,17 @@ ipcMain.handle('git:log', async (_, payload) => {
   if (!dir) throw new Error('No cwd specified');
   const args = ['log', '-n', '50', '--pretty=format:%H%t%an%t%ae%t%aI%t%s'];
   if (payload && payload.file) args.push('--', payload.file);
-  const lines = await git(dir, args, 30000);
-  return { ok: true, code: 0, timedOut: false, stdout: lines, stderr: '', text: (lines || '').trim() };
+  const res = await git(dir, args, 30000);
+  return { ok: res.ok, code: res.code, timedOut: res.timedOut, stdout: res.stdout || '', stderr: res.stderr || '', text: res.text || '' };
 });
 
 ipcMain.handle('git:blame', async (_, payload) => {
   const dir = registeredRoot(payload && payload.cwd);
   if (!dir) throw new Error('No cwd specified');
-  const args = ['blame', '-p', '-z'];
+  const args = ['blame', '-p'];
   if (payload && payload.file) args.push('--', payload.file);
-  const lines = await git(dir, args, 30000);
-  return { ok: true, code: 0, timedOut: false, stdout: lines, stderr: '', text: (lines || '').trim() };
+  const res = await git(dir, args, 30000);
+  return { ok: res.ok, code: res.code, timedOut: res.timedOut, stdout: res.stdout || '', stderr: res.stderr || '', text: res.text || '' };
 });
 
 ipcMain.handle('git:remote', async (_, cwd) => {
