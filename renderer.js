@@ -52,6 +52,8 @@ const S = {
   blameCache: new Map(),
   inlineBlame: false,
   inlineBlameIds: null,
+  plugins: [],
+  pluginCommands: [],
   breakpoints: new Map(),
   debug: null,
   compare: null,
@@ -4038,7 +4040,7 @@ async function ensureFileIndex() {
 /* ---------------- commands ---------------- */
 
 function commandList() {
-  return [
+  const base = [
     { id: 'file.new', label: 'File: New File', key: 'Ctrl+N', run: () => fileNewFlow() },
     { id: 'file.open', label: 'File: Open File…', key: 'Ctrl+Alt+O', run: () => openFilesFlow() },
     { id: 'workspace.open', label: 'File: Open Folder…', key: 'Ctrl+O', run: () => openWorkspaceDialog() },
@@ -4149,6 +4151,7 @@ function commandList() {
     { id: 'ai.chat', label: 'AI: Chat', run: () => openAiChat() },
     { id: 'docs.generate', label: 'Docs: Generate README (AI)', run: () => generateDocsFlow() }
   ];
+  return base.concat(S.pluginCommands || []);
 }
 
 function toggleFormatOnSave() {
@@ -5386,6 +5389,18 @@ async function generateDocsFlow() {
     await openFile(target);
   } catch (err) { toast('Could not write README.md: ' + err.message, 'error', 6000); }
 }
+function initPluginApi() {
+  window.peabox = window.peabox || {};
+  window.peabox.registerCommand = function (id, label, run) {
+    if (!id || !label || typeof run !== 'function') return false;
+    if (S.pluginCommands.some((c) => c.id === id)) return false;
+    S.pluginCommands.push({ id: 'plugin.' + id, label: String(label), run });
+    return true;
+  };
+  window.peabox.showMessage = function (msg) { toast(String(msg || ''), 'info', 3000); };
+  window.peabox.getActiveFile = function () { const e = currentEntry(); return e ? e.path : null; };
+  window.peabox.getActiveText = function () { const e = currentEntry(); return e ? e.model.getValue() : ''; };
+}
 function isTypingTarget(target) {
   if (!target) return false;
   const tag = target.tagName;
@@ -5712,6 +5727,7 @@ async function boot() {
   bindResizers();
   bindPalette();
   bindSubscriptions();
+  initPluginApi();
 
   const info = await api.app.info().catch(() => null);
   if (info) S.cli = info.cli || null;
