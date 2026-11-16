@@ -4011,6 +4011,7 @@ function commandList() {
     { id: 'git.amend', label: 'Git: Amend Last Commit…', run: () => amendCommitFlow() },
     { id: 'git.inlineBlame', label: 'Git: Toggle Inline Blame', run: () => toggleInlineBlame() },
     { id: 'run.start', label: 'Run: Run Current File', key: 'F5', run: () => runCurrent() },
+    { id: 'task.run', label: 'Task: Run npm script…', run: () => runTaskFlow() },
     { id: 'run.stop', label: 'Run: Stop', key: 'Shift+F5', run: () => stopRun() },
     { id: 'debug.start', label: 'Debug: Start Debugging…', run: () => startDebugFlow() },
     { id: 'debug.stop', label: 'Debug: Stop Session', key: 'Shift+F5', run: () => stopDebugSession() },
@@ -5029,6 +5030,7 @@ function handleMenuCommand(payload) {
     'terminal.toggle': () => terminalToggle(),
     'run.start': () => runCurrent(),
     'run.stop': () => stopRun(),
+    'task.run': () => runTaskFlow(),
     'debug.start': () => startDebugFlow(),
     'debug.stop': () => stopDebugSession(),
     'debug.toggleBreakpoint': () => debugToggleBreakpointAtCursor(),
@@ -5130,6 +5132,54 @@ function openMarkdownPreview() {
     actions: [{ label: 'Close', value: null }]
   });
 }
+async function runTaskFlow() {
+  if (!S.root) { toast('Open a folder first.', 'warn'); return; }
+  let scripts = {};
+  try {
+    const sep = (S.root.endsWith('/') || S.root.endsWith('\\')) ? '' : '/';
+    const res = await api.file.read(S.root + sep + 'package.json');
+    const pkg = JSON.parse(res.content || '{}');
+    scripts = (pkg && pkg.scripts) || {};
+  } catch (err) { toast('No package.json found in workspace root.', 'warn', 3000); return; }
+  const names = Object.keys(scripts);
+  if (!names.length) { toast('No scripts found in package.json.', 'info', 2500); return; }
+
+  const body = el('div');
+  body.appendChild(el('p', null, 'Run a script from package.json.'));
+  const list = el('div', 'modal-list');
+  body.appendChild(list);
+
+  const chosen = await new Promise((resolve) => {
+    names.forEach((name) => {
+      const item = el('div', 'modal-item');
+      item.appendChild(el('div', 'mi-title', name));
+      item.appendChild(el('div', 'mi-sub', scripts[name]));
+      item.tabIndex = 0;
+      item.onclick = () => resolve(name);
+      item.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); resolve(name); } };
+      list.appendChild(item);
+    });
+    showModal({
+      title: 'Run Task',
+      body,
+      actions: [{ label: 'Cancel', value: null }]
+    }).then((v) => { if (v !== null) resolve(null); });
+  });
+  if (!chosen) return;
+
+  if (!S.activeTerminal) {
+    try { await createTerminal(); } catch { /* ignore */ }
+  }
+  if (S.activeTerminal) {
+    const cmd = 'npm run ' + chosen + '\\r';
+    try { await api.terminal.write({ id: S.activeTerminal.id, data: cmd }); } catch (err) { toast(err.message, 'error'); }
+    showPanel('terminalPane');
+    toast('Running task: ' + chosen, 'info', 2000);
+  } else {
+    toast('Could not open a terminal.', 'error');
+  }
+}
+
 function isTypingTarget(target) {
   if (!target) return false;
   const tag = target.tagName;
