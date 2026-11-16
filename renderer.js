@@ -256,11 +256,41 @@ function showContextMenu(x, y, items) {
 
 /* ---------------- theme / layout ---------------- */
 
+async function chooseThemeFlow() {
+  const themes = ['peabox-dark', 'peabox-light', 'peabox-solarized-dark', 'peabox-high-contrast'];
+  const body = el('div');
+  const list = el('div', 'modal-list');
+  body.appendChild(list);
+  const picked = await new Promise((resolve) => {
+    themes.forEach((t) => {
+      const item = el('div', 'modal-item');
+      item.appendChild(el('div', 'mi-title', t));
+      item.tabIndex = 0;
+      item.onclick = () => resolve(t);
+      item.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); resolve(t); } };
+      list.appendChild(item);
+    });
+    showModal({ title: 'Choose Theme', body, actions: [{ label: 'Cancel', value: null }] })
+      .then((v) => { if (v !== null) resolve(null); });
+  });
+  if (!picked) return;
+  settings().theme = picked.includes('light') ? 'light' : 'dark';
+  // store chosen monaco theme name in settings for applyTheme to use
+  settings().monacoTheme = picked;
+  applyTheme();
+  persistSoon();
+  toast('Theme: ' + picked, 'success', 1800);
+}
+
 function resolvedTheme() {
-  if (settings().theme === 'system') {
-    return window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
-  }
-  return settings().theme;
+  const s = settings();
+  return s.theme === 'light' ? 'light' : 'dark';
+}
+
+function resolvedMonacoTheme() {
+  const s = settings();
+  if (s.monacoTheme) return s.monacoTheme;
+  return s.theme === 'light' ? 'peabox-light' : 'peabox-dark';
 }
 
 function applyTheme() {
@@ -269,7 +299,7 @@ function applyTheme() {
   const btn = $('themeBtn');
   btn.replaceChildren(icon(theme === 'dark' ? 'sun' : 'moon'));
   btn.title = theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme';
-  if (S.editor) monaco.editor.setTheme(theme === 'dark' ? 'peabox-dark' : 'peabox-light');
+  if (S.editor) monaco.editor.setTheme(resolvedMonacoTheme());
 }
 
 function applyLayout() {
@@ -543,9 +573,30 @@ function initMonaco() {
         'editorHoverWidget.border': '#c0cbdb'
       }
     });
+    monaco.editor.defineTheme('peabox-solarized-dark', {
+      base: 'vs-dark', inherit: true,
+      rules: [
+        { token: 'comment', foreground: '586e75', fontStyle: 'italic' },
+        { token: 'keyword', foreground: '859900' },
+        { token: 'string', foreground: '2aa198' },
+        { token: 'number', foreground: 'd33682' }
+      ],
+      colors: {
+        'editor.background': '#002b36',
+        'editor.foreground': '#839496',
+        'editor.lineHighlightBackground': '#073642',
+        'editor.selectionBackground': '#073642',
+        'editorCursor.foreground': '#93a1a1'
+      }
+    });
+    monaco.editor.defineTheme('peabox-high-contrast', {
+      base: 'hc-black', inherit: true,
+      rules: [],
+      colors: { 'editor.background': '#000000', 'editor.foreground': '#ffffff' }
+    });
 
     S.editor = monaco.editor.create($('editor'), {
-      theme: resolvedTheme() === 'dark' ? 'peabox-dark' : 'peabox-light',
+      theme: resolvedMonacoTheme(),
       automaticLayout: true,
       fontSize: settings().fontSize,
       fontFamily: settings().fontFamily,
@@ -4022,6 +4073,7 @@ function commandList() {
     { id: 'view.zoomOut', label: 'View: Decrease Editor Font Size', key: 'Ctrl+-', run: () => zoomEditor(-1) },
     { id: 'view.zoomReset', label: 'View: Reset Editor Font Size', key: 'Ctrl+0', run: () => zoomEditor(0) },
     { id: 'view.zen', label: 'View: Toggle Zen Mode', run: () => toggleZenMode() },
+    { id: 'view.theme', label: 'View: Choose Theme…', run: () => chooseThemeFlow() },
     { id: 'transform.json', label: 'Transform: Format JSON', run: () => applyTextTransform('format-json') },
     { id: 'transform.sort', label: 'Transform: Sort Lines Ascending', run: () => applyTextTransform('sort-lines') },
     { id: 'transform.dedupe', label: 'Transform: Remove Duplicate Lines', run: () => applyTextTransform('dedupe-lines') },
@@ -4123,7 +4175,7 @@ function toggleStickyScroll() {
 
 function editorOptions() {
   return {
-    theme: resolvedTheme() === 'dark' ? 'peabox-dark' : 'peabox-light',
+    theme: resolvedMonacoTheme(),
     automaticLayout: true,
     fontSize: settings().fontSize,
     fontFamily: settings().fontFamily,
@@ -5064,6 +5116,7 @@ function handleMenuCommand(payload) {
     'view.zoomOut': () => zoomEditor(-1),
     'view.zoomReset': () => zoomEditor(0),
     'view.zen': () => toggleZenMode(),
+    'view.theme': () => chooseThemeFlow(),
     'editor.split': () => toggleSplit(),
     'terminal.toggle': () => terminalToggle(),
     'run.start': () => runCurrent(),
