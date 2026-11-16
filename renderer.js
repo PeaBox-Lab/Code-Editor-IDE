@@ -653,6 +653,8 @@ function updateEol() {
 function updateStatus() {
   const entry = currentEntry();
   $('language').textContent = entry ? languageLabel(entry) : 'Plain Text';
+  const sizeEl = $('sizeStatus');
+  if (sizeEl) sizeEl.textContent = entry && entry.size ? PB.formatBytes(entry.size) : '';
   updateEol();
   updateEncodingStatus();
   updateDirtyStatus();
