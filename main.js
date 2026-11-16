@@ -1003,6 +1003,31 @@ ipcMain.handle('git:fetch', async (_, cwd) => {
 });
 ipcMain.handle('git:stash', (_, cwd) => git(registeredRoot(cwd), ['stash', 'push', '-u', '-m', 'PeaBox ' + new Date().toISOString()], 60000));
 ipcMain.handle('git:stashPop', (_, cwd) => git(registeredRoot(cwd), ['stash', 'pop'], 60000));
+
+ipcMain.handle('git:stashList', async (_, cwd) => {
+  const dir = registeredRoot(cwd);
+  const res = await git(dir, ['stash', 'list', '--format=%gd%x1f%gs%x1f%ci'], 30000);
+  if (!res.ok) return { ok: false, error: res.text || 'git stash list failed.', stashes: [] };
+  const stashes = (res.stdout || '').split(/\r?\n/).filter(Boolean).map((line) => {
+    const parts = line.split('\x1f');
+    return { ref: (parts[0] || '').trim(), message: (parts[1] || '').trim(), date: (parts[2] || '').trim() };
+  });
+  return { ok: true, stashes };
+});
+
+ipcMain.handle('git:stashApply', async (_, payload) => {
+  const dir = registeredRoot(payload && payload.cwd);
+  const ref = String(payload && payload.ref || '').trim();
+  if (!ref) return { ok: false, error: 'Stash ref required.' };
+  return git(dir, ['stash', 'apply', ref], 60000);
+});
+
+ipcMain.handle('git:stashDrop', async (_, payload) => {
+  const dir = registeredRoot(payload && payload.cwd);
+  const ref = String(payload && payload.ref || '').trim();
+  if (!ref) return { ok: false, error: 'Stash ref required.' };
+  return git(dir, ['stash', 'drop', ref], 60000);
+});
 ipcMain.handle('git:show', async (_, payload) => {
   const dir = registeredRoot(payload && payload.cwd);
   if (!dir) throw new Error('No cwd specified');

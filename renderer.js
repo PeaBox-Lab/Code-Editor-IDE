@@ -4005,6 +4005,7 @@ function commandList() {
     { id: 'git.pull', label: 'Git: Pull', run: () => gitBulk('pull') },
     { id: 'git.push', label: 'Git: Push', run: () => gitBulk('push') },
     { id: 'git.stash', label: 'Git: Stash Changes', run: () => gitBulk('stash') },
+    { id: 'git.stashBrowser', label: 'Git: Stash Browser…', run: () => stashBrowserFlow() },
     { id: 'git.stashPop', label: 'Git: Pop Stash', run: () => gitBulk('stashPop') },
     { id: 'git.newBranch', label: 'Git: Create Branch…', run: () => createBranch() },
     { id: 'git.deleteBranch', label: 'Git: Delete Branch…', run: () => deleteBranchFlow() },
@@ -5180,6 +5181,31 @@ async function runTaskFlow() {
   }
 }
 
+async function stashBrowserFlow() {
+  if (!S.root) { toast('Open a folder first.', 'warn'); return; }
+  let res;
+  try { res = await api.git.stashList(S.root); }
+  catch (err) { toast(err.message, 'error'); return; }
+  const stashes = (res && res.stashes) || [];
+  if (!stashes.length) { toast('No stashes found.', 'info', 2200); return; }
+
+  const body = el('div');
+  const list = el('div', 'modal-list');
+  stashes.forEach((s) => {
+    const item = el('div', 'modal-item');
+    const info = el('div', 'mi-body');
+    info.appendChild(el('div', 'mi-title', s.ref + '  ' + s.message));
+    info.appendChild(el('div', 'mi-sub', s.date));
+    const applyBtn = el('button', 'mini-btn', 'Apply');
+    applyBtn.onclick = async (e) => { e.stopPropagation(); const r = await api.git.stashApply({ cwd: S.root, ref: s.ref }); toast(r.ok ? 'Applied ' + s.ref : (r.text || 'Apply failed.'), r.ok ? 'success' : 'error', 3000); await refreshGit(); };
+    const dropBtn = el('button', 'mini-btn', 'Drop');
+    dropBtn.onclick = async (e) => { e.stopPropagation(); const r = await api.git.stashDrop({ cwd: S.root, ref: s.ref }); toast(r.ok ? 'Dropped ' + s.ref : (r.text || 'Drop failed.'), r.ok ? 'success' : 'error', 3000); await refreshGit(); await stashBrowserFlow(); };
+    item.append(info, applyBtn, dropBtn);
+    list.appendChild(item);
+  });
+  body.appendChild(list);
+  await showModal({ title: 'Stash Browser', body, actions: [{ label: 'Close', value: null }] });
+}
 function isTypingTarget(target) {
   if (!target) return false;
   const tag = target.tagName;
