@@ -1078,6 +1078,7 @@
       tabSize: 2, wordWrap: false, minimap: true, autoSave: false, autoSaveDelay: 800,
       formatOnSave: false, formatOnSaveLanguages: 'javascript,typescript,json,html,css,scss,less,markdown', stickyScroll: false,
       terminalFontSize: 13, terminalShell: '',
+env: 'development',
       runtimes: { python: 'python', node: 'node', go: 'go', powershell: 'powershell.exe' },
       excludes: DEFAULT_EXCLUDES.join(', '),
       sidebarWidth: 280, panelHeight: 220, showSidebar: true,

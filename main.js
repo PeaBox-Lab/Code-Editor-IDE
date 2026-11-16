@@ -1090,6 +1090,9 @@ ipcMain.handle('run:start', async (_, payload) => {
   // cannot encode box-drawing or emoji characters. Force UTF-8 and unbuffered
   // output so interactive programs and progress bars behave as expected.
   const env = { ...process.env };
+  if (payload && payload.env && typeof payload.env === 'object') {
+    Object.assign(env, payload.env);
+  }
   if (/python/i.test(name) || /python/i.test(exe)) {
     env.PYTHONIOENCODING = 'utf-8';
     env.PYTHONUTF8 = '1';

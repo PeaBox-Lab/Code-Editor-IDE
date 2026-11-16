@@ -3633,7 +3633,8 @@ async function runCurrent() {
   $('output').textContent = '> ' + spec.name + ': ' + spec.exe + ' ' + spec.args.join(' ') + '\n\n';
   try {
     const res = await api.run.start({
-      cwd: S.root || PB.dirname(entry.path), exe: spec.exe, args: spec.args, name: spec.name
+      cwd: S.root || PB.dirname(entry.path), exe: spec.exe, args: spec.args, name: spec.name,
+      env: { NODE_ENV: settings().env || 'development' }
     });
     S.runId = res.id;
     S.running = true;
@@ -5214,6 +5215,23 @@ function toggleZenMode() {
   toast(on ? 'Zen mode on (Esc to exit).' : 'Zen mode off.', 'info', 1800);
   if (S.editor && S.editor.layout) setTimeout(() => S.editor.layout(), 50);
 }
+function cycleEnv() {
+  const envs = ['development', 'staging', 'production'];
+  const s = settings();
+  const cur = s.env || 'development';
+  const idx = envs.indexOf(cur);
+  s.env = envs[(idx + 1) % envs.length];
+  applyEnv();
+  persistSoon();
+  toast('Environment: ' + s.env, 'info', 1600);
+}
+
+function applyEnv() {
+  const s = settings();
+  const env = s.env || 'development';
+  const el = $('envStatus');
+  if (el) { el.textContent = env; el.title = 'Environment: ' + env + ' (click to cycle)'; }
+}
 function isTypingTarget(target) {
   if (!target) return false;
   const tag = target.tagName;
@@ -5428,6 +5446,7 @@ function bindEvents() {
   $('closePanel').onclick = () => $('panel').classList.add('hidden');
   $('panelBtn').onclick = () => togglePanel();
   $('gitStatus').onclick = () => showView('git');
+  $('envStatus').onclick = () => cycleEnv();
 
   document.addEventListener('keydown', onKeyDown, true);
   wireExternalDragDrop();
@@ -5547,6 +5566,7 @@ async function boot() {
 
   applyTheme();
   applyLayout();
+  applyEnv();
   renderRecent();
   showWelcome(true);
 
