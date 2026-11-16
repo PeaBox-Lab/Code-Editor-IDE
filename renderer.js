@@ -2983,6 +2983,28 @@ async function wireLspToEditor() {
         }
       });
     }
+    // Wire inlay hints if supported.
+    if (PB.lspMethodCapable(caps, 'textDocument/inlayHint') && typeof monaco.languages.registerInlayHintsProvider === 'function') {
+      monaco.languages.registerInlayHintsProvider(lang, {
+        provideInlayHints: async (model, range) => {
+          const start = PB.monacoPositionToLSP({ line: range.start.lineNumber - 1, column: range.start.column - 1 });
+          const end = PB.monacoPositionToLSP({ line: range.end.lineNumber - 1, column: range.end.column - 1 });
+          const result = await lsp.request({ id: server.id, method: 'textDocument/inlayHint', params: {
+            textDocument: { uri: model.uri.toString() },
+            range: { start: start, end: end }
+          } });
+          if (!result || !result.ok || !result.result) return { hints: [], dispose: () => {} };
+          const hints = (result.result || []).map((h) => ({
+            position: { lineNumber: (h.position.line || 0) + 1, column: (h.position.character || 0) + 1 },
+            label: typeof h.label === 'string' ? h.label : (h.label || []).map((l) => l.value || '').join(''),
+            kind: h.kind === 1 ? 1 : 2,
+            paddingLeft: !!h.paddingLeft,
+            paddingRight: !!h.paddingRight
+          }));
+          return { hints, dispose: () => {} };
+        }
+      });
+    }
     toast('Wired LSP (' + server.id + ') for ' + lang + '.', 'success', 2500);
   } catch (err) { toast(err.message, 'error'); }
 }
