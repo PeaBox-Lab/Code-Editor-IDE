@@ -45,6 +45,10 @@ const S = {
   problems: [],
   editor2: null,
   current2: null,
+  navHistory: [],
+  navIndex: -1,
+  navNavigating: false,
+  recentlyClosed: [],
   dragKey: null,
   ai: {
     enabled: false,
@@ -355,6 +359,52 @@ function captureCurrentPosition() {
   entry.scrollTop = S.editor.getScrollTop();
 }
 
+/* ---------------- navigation history ---------------- */
+
+function pushNav(path, line, column) {
+  if (!path) return;
+  const stack = S.navHistory;
+  const top = stack[S.navIndex];
+  // Skip duplicate entries for the same location.
+  if (top && top.path === path && (top.line || 1) === (line || 1) && (top.column || 1) === (column || 1)) return;
+  // New navigation truncates any forward history.
+  if (S.navIndex < stack.length - 1) stack.length = S.navIndex + 1;
+  stack.push({ path, line: line || 1, column: column || 1 });
+  if (stack.length > 80) stack.shift();
+  S.navIndex = stack.length - 1;
+}
+
+function navJump(stackIndex) {
+  const stack = S.navHistory;
+  if (!stack || stackIndex < 0 || stackIndex >= stack.length || stackIndex === S.navIndex) return;
+  const target = stack[stackIndex];
+  S.navIndex = stackIndex;
+  S.navNavigating = true;
+  openFile(target.path, target.line, target.column).finally(() => { S.navNavigating = false; });
+}
+
+function navBack() {
+  navJump(S.navIndex - 1);
+}
+
+function navForward() {
+  navJump(S.navIndex + 1);
+}
+
+function cycleTabs(direction) {
+  const keys = Array.from(S.models.keys());
+  if (!keys.length) return;
+  const currentIndex = keys.indexOf(S.current);
+  const nextIndex = (currentIndex + direction + keys.length) % keys.length;
+  activateEntry(keys[nextIndex]);
+}
+
+function reopenClosedEditor() {
+  if (!S.recentlyClosed || !S.recentlyClosed.length) { toast('No recently closed editors.', 'info', 1800); return; }
+  const path = S.recentlyClosed.pop();
+  openFile(path).catch(() => toast('Could not reopen ' + nameOf(path), 'warn'));
+}
+
 function collectSession() {
   captureCurrentPosition();
   const active = currentEntry();
@@ -590,6 +640,9 @@ async function loadWorkspace(tree, options) {
   S.fileIndexRoot = null;
   S.git = null;
   S.gitFiles = {};
+  S.navHistory = [];
+  S.navIndex = -1;
+  S.recentlyClosed = [];
   $('workspace').textContent = S.root;
   $('workspace').title = S.root;
   $('workspaceBtn').title = S.root;
@@ -1120,6 +1173,7 @@ async function openFile(filePath, line, column) {
   } else if (entry.scrollTop) {
     S.editor.setScrollTop(entry.scrollTop);
   }
+  if (!S.navNavigating) pushNav(filePath, entry.cursorLine, entry.cursorColumn);
   S.editor.focus();
 }
 
@@ -1254,7 +1308,12 @@ async function closeEntry(entry, force) {
   }
   clearTimeout(entry.recoveryTimer);
   clearTimeout(entry.autosaveTimer);
-  if (!entry.virtual) api.file.watchStop(entry.path).catch(() => {});
+  if (!entry.virtual) {
+    api.file.watchStop(entry.path).catch(() => {});
+    S.recentlyClosed = S.recentlyClosed.filter((p) => p !== entry.path);
+    S.recentlyClosed.push(entry.path);
+    if (S.recentlyClosed.length > 12) S.recentlyClosed.shift();
+  }
   if (S.editor2 && S.current2 === entry.key) { try { S.editor2.setModel(null); } catch { /* ignore */ } S.current2 = null; }
   try { entry.model.dispose(); } catch { /* ignore */ }
   S.models.delete(entry.key);
@@ -3135,6 +3194,11 @@ function commandList() {
     { id: 'view.outline', label: 'View: Show Outline', key: 'Ctrl+Shift+U', run: () => showView('outline') },
     { id: 'view.split', label: 'View: Toggle Split Editor', key: 'Ctrl+\\', run: () => toggleSplit() },
     { id: 'view.symbols', label: 'View: Go to Symbol…', key: 'Ctrl+Shift+O', run: () => openPalette('symbols') },
+    { id: 'workbench.navBack', label: 'Go Back', key: 'Alt+←', run: () => navBack() },
+    { id: 'workbench.navForward', label: 'Go Forward', key: 'Alt+→', run: () => navForward() },
+    { id: 'workbench.nextEditor', label: 'View: Open Next Editor', key: 'Ctrl+Tab', run: () => cycleTabs(1) },
+    { id: 'workbench.prevEditor', label: 'View: Open Previous Editor', key: 'Ctrl+Shift+Tab', run: () => cycleTabs(-1) },
+    { id: 'workbench.reopenClosed', label: 'File: Reopen Closed Editor', key: 'Ctrl+Shift+T', run: () => reopenClosedEditor() },
     { id: 'view.zoomIn', label: 'View: Increase Editor Font Size', key: 'Ctrl+=', run: () => zoomEditor(1) },
     { id: 'view.zoomOut', label: 'View: Decrease Editor Font Size', key: 'Ctrl+-', run: () => zoomEditor(-1) },
     { id: 'view.zoomReset', label: 'View: Reset Editor Font Size', key: 'Ctrl+0', run: () => zoomEditor(0) },
@@ -3790,6 +3854,12 @@ function showShortcuts() {
     ['Save', 'Ctrl+S'],
     ['Save all', 'Ctrl+Alt+S'],
     ['Close editor', 'Ctrl+W'],
+    ['Reopen closed editor', 'Ctrl+Shift+T'],
+    ['Next / previous editor', 'Ctrl+Tab / Ctrl+Shift+Tab'],
+    ['Navigate back / forward', 'Alt+← / Alt+→'],
+    ['Go to definition', 'F12'],
+    ['Find references', 'Shift+F12'],
+    ['Rename symbol', 'F2'],
     ['Toggle sidebar', 'Ctrl+B'],
     ['Toggle split editor', 'Ctrl+\\'],
     ['Toggle panel', 'Ctrl+J'],
@@ -3932,6 +4002,11 @@ function handleMenuCommand(payload) {
     'file.saveAll': () => saveAll(),
     'file.close': () => closeEntry(currentEntry()),
     'file.closeAll': () => closeAll(),
+    'workbench.navBack': () => navBack(),
+    'workbench.navForward': () => navForward(),
+    'workbench.nextEditor': () => cycleTabs(1),
+    'workbench.prevEditor': () => cycleTabs(-1),
+    'workbench.reopenClosed': () => reopenClosedEditor(),
     'app.settings': () => openSettings(),
     'app.shortcuts': () => showShortcuts(),
     'palette.commands': () => openPalette('commands'),
@@ -4048,9 +4123,25 @@ function onKeyDown(event) {
   if (event.altKey && event.shiftKey && key === 'ArrowUp') { event.preventDefault(); editorAction('editor.action.copyLinesUpAction'); return; }
   if (event.altKey && key === 'ArrowDown') { event.preventDefault(); editorAction('editor.action.moveLinesDownAction'); return; }
   if (event.altKey && key === 'ArrowUp') { event.preventDefault(); editorAction('editor.action.moveLinesUpAction'); return; }
+  if (mod && key === 'Enter') {
+    if (isTypingTarget(event.target)) return;
+    event.preventDefault();
+    if (event.shiftKey) editorAction('editor.action.insertLineBefore');
+    else editorAction('editor.action.insertLineAfter');
+    return;
+  }
+  if (event.altKey && event.shiftKey && key === 'ArrowDown') { event.preventDefault(); editorAction('editor.action.copyLinesDownAction'); return; }
+  if (event.altKey && event.shiftKey && key === 'ArrowUp') { event.preventDefault(); editorAction('editor.action.copyLinesUpAction'); return; }
+  if (event.altKey && key === 'ArrowDown') { event.preventDefault(); editorAction('editor.action.moveLinesDownAction'); return; }
+  if (event.altKey && key === 'ArrowUp') { event.preventDefault(); editorAction('editor.action.moveLinesUpAction'); return; }
   if (key === 'F12') { event.preventDefault(); if (event.shiftKey) findLspReferences(); else goToDefinition(); return; }
   if (key === 'F2') { event.preventDefault(); renameSymbolLsp(); return; }
   if (key === 'F5') { event.preventDefault(); if (event.shiftKey) stopRun(); else runCurrent(); return; }
+  if (mod && key === 'Tab' && event.shiftKey) { event.preventDefault(); cycleTabs(-1); return; }
+  if (mod && key === 'Tab' && !event.shiftKey) { event.preventDefault(); cycleTabs(1); return; }
+  if (event.altKey && key === 'ArrowLeft') { event.preventDefault(); navBack(); return; }
+  if (event.altKey && key === 'ArrowRight') { event.preventDefault(); navForward(); return; }
+  if (mod && event.shiftKey && lower === 't') { event.preventDefault(); reopenClosedEditor(); return; }
 }
 
 /* ---------------- init ---------------- */
