@@ -11,7 +11,9 @@ const S = {
   state: null,
   root: null,
   roots: [],
-  current: null,
+  vimMode: false,
+  vimState: 'normal',
+  vimBuffer: '',
   editor: null,
   models: new Map(),
   rootChildren: [],
@@ -4187,6 +4189,7 @@ function commandList() {
     { id: 'view.zoomOut', label: 'View: Decrease Editor Font Size', key: 'Ctrl+-', run: () => zoomEditor(-1) },
     { id: 'view.zoomReset', label: 'View: Reset Editor Font Size', key: 'Ctrl+0', run: () => zoomEditor(0) },
     { id: 'view.zen', label: 'View: Toggle Zen Mode', run: () => toggleZenMode() },
+    { id: 'view.vim', label: 'View: Toggle Vim Mode', run: () => toggleVimMode() },
     { id: 'view.theme', label: 'View: Choose Theme…', run: () => chooseThemeFlow() },
     { id: 'transform.json', label: 'Transform: Format JSON', run: () => applyTextTransform('format-json') },
     { id: 'transform.sort', label: 'Transform: Sort Lines Ascending', run: () => applyTextTransform('sort-lines') },
@@ -5580,6 +5583,115 @@ async function sshConnectFlow() {
     toast('Could not open a terminal.', 'error');
   }
 }
+function toggleVimMode() {
+  S.vimMode = !S.vimMode;
+  S.vimState = S.vimMode ? 'normal' : 'insert';
+  S.vimBuffer = '';
+  toast(S.vimMode ? 'Vim mode ON (Esc → normal, i → insert).' : 'Vim mode OFF.', 'info', 2000);
+  updateVimStatus();
+}
+
+function updateVimStatus() {
+  const el = $('vimStatus');
+  if (!el) return;
+  if (!S.vimMode) { el.textContent = ''; return; }
+  el.textContent = '-- ' + (S.vimState === 'normal' ? 'NORMAL' : 'INSERT') + ' --';
+}
+
+function vimHandleKey(event) {
+  if (!S.vimMode || !S.editor) return false;
+  const entry = currentEntry();
+  if (!entry) return false;
+  const key = event.key;
+  // Insert mode: only Esc returns to normal.
+  if (S.vimState === 'insert') {
+    if (key === 'Escape') {
+      S.vimState = 'normal';
+      S.vimBuffer = '';
+      updateVimStatus();
+      event.preventDefault();
+      event.stopPropagation();
+      return true;
+    }
+    return false;
+  }
+  // Normal mode handling.
+  const pos = S.editor.getPosition();
+  const model = S.editor.getModel();
+  if (!pos || !model) return false;
+
+  // Collect multi-key sequences.
+  const seq = S.vimBuffer + key;
+  // Single-char motions
+  let handled = false;
+  if (key === 'h') { S.editor.setPosition({ lineNumber: pos.lineNumber, column: Math.max(1, pos.column - 1) }); handled = true; }
+  else if (key === 'l') { S.editor.setPosition({ lineNumber: pos.lineNumber, column: Math.min(model.getLineMaxColumn(pos.lineNumber), pos.column + 1) }); handled = true; }
+  else if (key === 'j') { S.editor.setPosition({ lineNumber: Math.min(model.getLineCount(), pos.lineNumber + 1), column: pos.column }); handled = true; }
+  else if (key === 'k') { S.editor.setPosition({ lineNumber: Math.max(1, pos.lineNumber - 1), column: pos.column }); handled = true; }
+  else if (key === '0') { S.editor.setPosition({ lineNumber: pos.lineNumber, column: 1 }); handled = true; }
+  else if (key === '$') { S.editor.setPosition({ lineNumber: pos.lineNumber, column: model.getLineMaxColumn(pos.lineNumber) }); handled = true; }
+  else if (key === 'G') { S.editor.setPosition({ lineNumber: model.getLineCount(), column: 1 }); S.editor.revealLine(model.getLineCount()); handled = true; }
+  else if (key === 'g' && S.vimBuffer !== 'g') { S.vimBuffer = 'g'; event.preventDefault(); event.stopPropagation(); return true; }
+  else if (key === 'g' && S.vimBuffer === 'g') { S.editor.setPosition({ lineNumber: 1, column: 1 }); S.editor.revealLine(1); S.vimBuffer = ''; handled = true; }
+  else if (key === 'i') { S.vimState = 'insert'; S.vimBuffer = ''; updateVimStatus(); handled = true; }
+  else if (key === 'a') { S.editor.setPosition({ lineNumber: pos.lineNumber, column: Math.min(model.getLineMaxColumn(pos.lineNumber), pos.column + 1) }); S.vimState = 'insert'; S.vimBuffer = ''; updateVimStatus(); handled = true; }
+  else if (key === 'o') { const ln = pos.lineNumber; S.editor.executeEdits('vim', [{ range: new monaco.Range(ln, model.getLineMaxColumn(ln), ln, model.getLineMaxColumn(ln)), text: '\\n', forceMoveMarkers: true }]); S.editor.setPosition({ lineNumber: ln + 1, column: 1 }); S.vimState = 'insert'; S.vimBuffer = ''; updateVimStatus(); handled = true; }
+  else if (key === 'O') { const ln = pos.lineNumber; S.editor.executeEdits('vim', [{ range: new monaco.Range(ln, 1, ln, 1), text: '\\n', forceMoveMarkers: true }]); S.editor.setPosition({ lineNumber: ln, column: 1 }); S.vimState = 'insert'; S.vimBuffer = ''; updateVimStatus(); handled = true; }
+  else if (key === 'x') { S.editor.executeEdits('vim', [{ range: new monaco.Range(pos.lineNumber, pos.column, pos.lineNumber, Math.min(model.getLineMaxColumn(pos.lineNumber), pos.column + 1)), text: '', forceMoveMarkers: true }]); handled = true; }
+  else if (key === 'd' && S.vimBuffer !== 'd') { S.vimBuffer = 'd'; event.preventDefault(); event.stopPropagation(); return true; }
+  else if (key === 'd' && S.vimBuffer === 'd') { // dd
+    const ln = pos.lineNumber; const lineCount = model.getLineCount();
+    const range = ln < lineCount ? new monaco.Range(ln, 1, ln + 1, 1) : new monaco.Range(ln, 1, ln, model.getLineMaxColumn(ln));
+    const text = model.getLineContent(ln);
+    S.vimYank = text;
+    S.editor.executeEdits('vim', [{ range, text: '', forceMoveMarkers: true }]);
+    S.vimBuffer = '';
+    handled = true;
+  }
+  else if (key === 'y' && S.vimBuffer !== 'y') { S.vimBuffer = 'y'; event.preventDefault(); event.stopPropagation(); return true; }
+  else if (key === 'y' && S.vimBuffer === 'y') { // yy
+    S.vimYank = model.getLineContent(pos.lineNumber);
+    S.vimBuffer = '';
+    toast('Yanked line.', 'info', 1200);
+    handled = true;
+  }
+  else if (key === 'p') {
+    const text = (S.vimYank || '') + '\\n';
+    S.editor.executeEdits('vim', [{ range: new monaco.Range(pos.lineNumber, model.getLineMaxColumn(pos.lineNumber), pos.lineNumber, model.getLineMaxColumn(pos.lineNumber)), text, forceMoveMarkers: true }]);
+    S.vimBuffer = '';
+    handled = true;
+  }
+  else if (key === 'u') { S.editor.trigger('vim', 'undo', {}); S.vimBuffer = ''; handled = true; }
+  else if (key === ':') {
+    modalInput('Vim command', ':', '', 'Run').then((cmd) => {
+      if (cmd === 'w' || cmd === 'wq') { saveFile(); }
+      if (cmd === 'q' || cmd === 'wq') { closeEntry(currentEntry()); }
+    });
+    S.vimBuffer = '';
+    handled = true;
+  }
+  else if (key === '/') {
+    S.editor.focus();
+    S.editor.trigger('vim', 'actions.find', {});
+    S.vimBuffer = '';
+    handled = true;
+  }
+  else {
+    // Unknown key: reset buffer
+    S.vimBuffer = '';
+  }
+
+  if (handled) {
+    S.vimBuffer = S.vimBuffer === 'g' || S.vimBuffer === 'd' || S.vimBuffer === 'y' ? S.vimBuffer : '';
+    updateVimStatus();
+    event.preventDefault();
+    event.stopPropagation();
+    return true;
+  }
+  // If buffer pending and key not consumed, reset
+  if (S.vimBuffer) { S.vimBuffer = ''; updateVimStatus(); }
+  return false;
+}
 function isTypingTarget(target) {
   if (!target) return false;
   const tag = target.tagName;
@@ -5806,6 +5918,7 @@ function bindEvents() {
   $('envStatus').onclick = () => cycleEnv();
 
   document.addEventListener('keydown', onKeyDown, true);
+  document.addEventListener('keydown', (e) => { if (vimHandleKey(e)) e.stopImmediatePropagation(); }, true);
   wireExternalDragDrop();
   wireDebugUi();
   window.addEventListener('resize', () => { if (S.activeTerminal) fitTerminal(S.activeTerminal); });
