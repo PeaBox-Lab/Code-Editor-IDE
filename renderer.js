@@ -1255,8 +1255,33 @@ function openVirtual(label, content) {
   activateEntry(key);
 }
 
+async function openImagePreview(filePath) {
+  const body = el('div', 'binary-preview');
+  const img = document.createElement('img');
+  img.src = 'file://' + encodeURI(filePath.replace(/\\/g, '/'));
+  img.style.maxWidth = '100%';
+  img.style.maxHeight = '60vh';
+  img.alt = PB.basename(filePath);
+  body.appendChild(img);
+  body.appendChild(el('div', 'modal-note', PB.basename(filePath)));
+  await showModal({ title: 'Image Preview', body, actions: [{ label: 'Close', value: null }] });
+}
+
+async function openBinaryPreview(filePath) {
+  let size = 0;
+  try { const st = await api.file.stat(filePath); size = (st && st.size) || 0; } catch { /* ignore */ }
+  const body = el('div', 'binary-preview');
+  body.appendChild(el('div', 'modal-note', PB.basename(filePath) + '  (' + PB.formatBytes(size) + ') — binary file, hex view unavailable in this build.'));
+  await showModal({ title: 'Binary File', body, actions: [{ label: 'Close', value: null }] });
+}
+
 async function openFile(filePath, line, column) {
   if (!filePath) return;
+  const ext = PB.extname(filePath).toLowerCase();
+  const IMAGE_EXTS = new Set(['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'ico', 'bmp']);
+  const BINARY_EXTS = new Set(['exe', 'dll', 'bin', 'zip', 'tar', 'gz', '7z', 'rar', 'pdf', 'woff', 'woff2', 'ttf', 'otf', 'mp3', 'mp4', 'wav', 'ogg']);
+  if (IMAGE_EXTS.has(ext)) { await openImagePreview(filePath); return; }
+  if (BINARY_EXTS.has(ext)) { await openBinaryPreview(filePath); return; }
   let entry = S.models.get(filePath);
   if (!entry) {
     let stat;
