@@ -36,6 +36,7 @@ contextBridge.exposeInMainWorld('api', {
 
   file: {
     read: (path) => invoke('file:read', path),
+    readBinary: (path) => invoke('file:readBinary', path),
     write: (path, content, expectedMtime) => invoke('file:write', path, content, expectedMtime),
     stat: (path) => invoke('fs:stat', path),
     newFile: (root) => invoke('file:new', root),

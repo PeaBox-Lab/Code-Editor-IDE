@@ -775,6 +775,15 @@ ipcMain.handle('file:read', (_, file) => {
   return { content, mtime: st.mtimeMs, mtimeMs: st.mtimeMs, size: st.size };
 });
 
+ipcMain.handle('file:readBinary', (_, file) => {
+  const p = assertAllowed(file);
+  const st = fs.statSync(p);
+  if (!st.isFile()) throw new Error('Not a file.');
+  if (st.size > 4 * 1024 * 1024) throw new Error('Binary files larger than 4 MB are not previewed.');
+  const buf = fs.readFileSync(p);
+  return { base64: buf.toString('base64'), size: st.size, mtime: st.mtimeMs, mtimeMs: st.mtimeMs };
+});
+
 ipcMain.handle('fs:stat', (_, file) => {
   let safe;
   try { safe = assertAllowed(file, true); } catch { return { exists: false, isFile: false, isDirectory: false }; }

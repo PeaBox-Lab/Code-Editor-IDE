@@ -1298,10 +1298,30 @@ async function openImagePreview(filePath) {
 
 async function openBinaryPreview(filePath) {
   let size = 0;
-  try { const st = await api.file.stat(filePath); size = (st && st.size) || 0; } catch { /* ignore */ }
+  let base64 = '';
+  try {
+    const res = await api.file.readBinary(filePath);
+    size = (res && res.size) || 0;
+    base64 = (res && res.base64) || '';
+  } catch (err) { toast(err.message, 'error'); return; }
+  // Decode base64 to bytes.
+  let bytes;
+  try { bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0)); }
+  catch { bytes = new Uint8Array(0); }
+  const lines = [];
+  const CHUNK = 16;
+  for (let off = 0; off < bytes.length; off += CHUNK) {
+    const slice = bytes.slice(off, off + CHUNK);
+    const hex = Array.from(slice).map((b) => b.toString(16).padStart(2, '0')).join(' ');
+    const ascii = Array.from(slice).map((b) => (b >= 32 && b < 127) ? String.fromCharCode(b) : '.').join('');
+    lines.push(off.toString(16).padStart(8, '0') + '  ' + hex.padEnd(CHUNK * 3 - 1, ' ') + '  |' + ascii + '|');
+  }
   const body = el('div', 'binary-preview');
-  body.appendChild(el('div', 'modal-note', PB.basename(filePath) + '  (' + PB.formatBytes(size) + ') — binary file, hex view unavailable in this build.'));
-  await showModal({ title: 'Binary File', body, actions: [{ label: 'Close', value: null }] });
+  const pre = el('pre', 'hex-view');
+  pre.textContent = lines.join('\\n') || '(empty file)';
+  body.appendChild(pre);
+  body.appendChild(el('div', 'modal-note', PB.basename(filePath) + '  (' + PB.formatBytes(size) + ')'));
+  await showModal({ title: 'Hex View', body, actions: [{ label: 'Close', value: null }] });
 }
 
 async function openFile(filePath, line, column) {
