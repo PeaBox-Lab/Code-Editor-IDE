@@ -4215,6 +4215,7 @@ function commandList() {
     { id: 'git.inlineBlame', label: 'Git: Toggle Inline Blame', run: () => toggleInlineBlame() },
     { id: 'run.start', label: 'Run: Run Current File', key: 'F5', run: () => runCurrent() },
     { id: 'deploy.run', label: 'Deploy: Run Deploy Command', run: () => deployFlow() },
+    { id: 'remote.ssh', label: 'Remote: Connect to SSH host', run: () => sshConnectFlow() },
     { id: 'task.run', label: 'Task: Run npm script…', run: () => runTaskFlow() },
     { id: 'run.stop', label: 'Run: Stop', key: 'Shift+F5', run: () => stopRun() },
     { id: 'debug.start', label: 'Debug: Start Debugging…', run: () => startDebugFlow() },
@@ -5559,6 +5560,25 @@ async function openLargeFileViewer(filePath, size) {
   moreBtn.onclick = loadMore;
   await loadMore();
   await showModal({ title: 'Large File Viewer', body, actions: [{ label: 'Close', value: null }] });
+}
+async function sshConnectFlow() {
+  const host = await modalInput('Remote: Connect', 'SSH host (user@host or host)', '', 'Connect');
+  if (!host) return;
+  const port = await modalInput('Remote: Connect', 'Port (blank for 22)', '22', 'Connect');
+  if (port === null) return;
+  const userHost = host.includes('@') ? host : host;
+  const portArg = (port && port !== '22') ? ' -p ' + port : '';
+  const cmd = 'ssh' + portArg + ' ' + userHost;
+  if (!S.activeTerminal) {
+    try { await createTerminal(); } catch { /* ignore */ }
+  }
+  if (S.activeTerminal) {
+    try { await api.terminal.write({ id: S.activeTerminal.id, data: cmd + '\\r' }); } catch (err) { toast(err.message, 'error'); return; }
+    showPanel('terminalPane');
+    toast('Connecting: ' + cmd, 'info', 2000);
+  } else {
+    toast('Could not open a terminal.', 'error');
+  }
 }
 function isTypingTarget(target) {
   if (!target) return false;
