@@ -4192,6 +4192,7 @@ function commandList() {
     { id: 'git.amend', label: 'Git: Amend Last Commit…', run: () => amendCommitFlow() },
     { id: 'git.inlineBlame', label: 'Git: Toggle Inline Blame', run: () => toggleInlineBlame() },
     { id: 'run.start', label: 'Run: Run Current File', key: 'F5', run: () => runCurrent() },
+    { id: 'deploy.run', label: 'Deploy: Run Deploy Command', run: () => deployFlow() },
     { id: 'task.run', label: 'Task: Run npm script…', run: () => runTaskFlow() },
     { id: 'run.stop', label: 'Run: Stop', key: 'Shift+F5', run: () => stopRun() },
     { id: 'debug.start', label: 'Debug: Start Debugging…', run: () => startDebugFlow() },
@@ -5490,6 +5491,26 @@ function initPluginApi() {
   window.peabox.showMessage = function (msg) { toast(String(msg || ''), 'info', 3000); };
   window.peabox.getActiveFile = function () { const e = currentEntry(); return e ? e.path : null; };
   window.peabox.getActiveText = function () { const e = currentEntry(); return e ? e.model.getValue() : ''; };
+}
+async function deployFlow() {
+  const s = settings();
+  let cmd = s.deployCommand || '';
+  if (!cmd) {
+    cmd = await modalInput('Deploy', 'Deploy command (runs in terminal)', 'npm run deploy', 'Save & Run');
+    if (!cmd) return;
+    s.deployCommand = cmd;
+    persistSoon();
+  }
+  if (!S.activeTerminal) {
+    try { await createTerminal(); } catch { /* ignore */ }
+  }
+  if (S.activeTerminal) {
+    try { await api.terminal.write({ id: S.activeTerminal.id, data: cmd + '\\r' }); } catch (err) { toast(err.message, 'error'); return; }
+    showPanel('terminalPane');
+    toast('Deploying: ' + cmd, 'info', 2000);
+  } else {
+    toast('Could not open a terminal.', 'error');
+  }
 }
 function isTypingTarget(target) {
   if (!target) return false;
