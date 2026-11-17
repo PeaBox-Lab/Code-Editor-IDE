@@ -1340,13 +1340,15 @@ async function openFile(filePath, line, column) {
     if (stat && size > LARGE_FILE) {
       const answer = await showModal({
         title: 'Large file',
-        body: 'This file is ' + PB.formatBytes(size) + '. Opening it in the editor may be slow. Open anyway?',
+        body: 'This file is ' + PB.formatBytes(size) + '. Opening it in the editor may be slow.',
         actions: [
           { label: 'Cancel', value: null },
-          { label: 'Open anyway', value: 'open', class: 'primary' }
+          { label: 'Open in viewer', value: 'viewer' },
+          { label: 'Open in editor', value: 'open', class: 'primary' }
         ]
       });
-      if (answer !== 'open') return;
+      if (answer === null) return;
+      if (answer === 'viewer') { await openLargeFileViewer(filePath, size); return; }
     }
     try {
       const res = await api.file.read(filePath);
@@ -5531,6 +5533,32 @@ async function deployFlow() {
   } else {
     toast('Could not open a terminal.', 'error');
   }
+}
+async function openLargeFileViewer(filePath, size) {
+  const body = el('div', 'binary-preview');
+  const pre = el('pre', 'hex-view');
+  pre.textContent = 'Loading…';
+  body.appendChild(pre);
+  const moreBtn = el('button', 'mini-btn', 'Load more');
+  body.appendChild(moreBtn);
+  body.appendChild(el('div', 'modal-note', PB.basename(filePath) + '  (' + PB.formatBytes(size) + ')'));
+
+  let offset = 0;
+  const CHUNK = 64 * 1024;
+  async function loadMore() {
+    const res = await api.file.readChunk({ file: filePath, offset, length: CHUNK });
+    if (res.binary) { pre.textContent = 'Binary file — use Hex View instead.'; moreBtn.disabled = true; return; }
+    pre.textContent += (pre.textContent === 'Loading…' ? '' : '') + res.chunk;
+    if (pre.textContent === 'Loading…') pre.textContent = res.chunk || '';
+    offset += res.bytesRead;
+    moreBtn.disabled = offset >= res.total;
+    moreBtn.textContent = moreBtn.disabled ? 'End of file' : 'Load more';
+  }
+  // reset
+  pre.textContent = '';
+  moreBtn.onclick = loadMore;
+  await loadMore();
+  await showModal({ title: 'Large File Viewer', body, actions: [{ label: 'Close', value: null }] });
 }
 function isTypingTarget(target) {
   if (!target) return false;

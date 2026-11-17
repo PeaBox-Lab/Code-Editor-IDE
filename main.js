@@ -775,6 +775,22 @@ ipcMain.handle('file:read', (_, file) => {
   return { content, mtime: st.mtimeMs, mtimeMs: st.mtimeMs, size: st.size };
 });
 
+ipcMain.handle('file:readChunk', (_, payload) => {
+  const p = assertAllowed(payload && payload.file);
+  const st = fs.statSync(p);
+  if (!st.isFile()) throw new Error('Not a file.');
+  const offset = Math.max(0, Number(payload && payload.offset) || 0);
+  const length = Math.min(256 * 1024, Math.max(1024, Number(payload && payload.length) || (64 * 1024)));
+  const fd = fs.openSync(p, 'r');
+  const buf = Buffer.alloc(length);
+  const bytesRead = fs.readSync(fd, buf, 0, length, offset);
+  fs.closeSync(fd);
+  const slice = buf.slice(0, bytesRead);
+  // Detect binary.
+  if (slice.includes(0)) return { binary: true, offset, bytesRead, total: st.size, chunk: '' };
+  return { binary: false, offset, bytesRead, total: st.size, chunk: slice.toString('utf8') };
+});
+
 ipcMain.handle('file:readBinary', (_, file) => {
   const p = assertAllowed(file);
   const st = fs.statSync(p);
