@@ -10,6 +10,7 @@ const $$ = (sel, root) => Array.from((root || document).querySelectorAll(sel));
 const S = {
   state: null,
   root: null,
+  roots: [],
   current: null,
   editor: null,
   models: new Map(),
@@ -703,6 +704,7 @@ function relativeToRoot(p) {
 async function loadWorkspace(tree, options) {
   options = options || {};
   S.root = tree.root;
+  S.roots = [tree.root];
   S.rootChildren = tree.children || [];
   S.treeCache.clear();
   S.expanded.clear();
@@ -743,6 +745,19 @@ async function openWorkspaceDialog() {
   } catch (err) { toast(err.message, 'error'); }
 }
 
+async function addRootFolder() {
+  try {
+    const tree = await api.workspace.choose();
+    if (!tree) return;
+    if (S.roots.includes(tree.root)) { toast('Folder already in workspace.', 'info', 2000); return; }
+    S.roots.push(tree.root);
+    S.treeCache.set(tree.root, tree.children || []);
+    S.expanded.add(tree.root);
+    renderExplorer();
+    persistSoon();
+    toast('Added ' + PB.basename(tree.root), 'success', 1800);
+  } catch (err) { toast(err.message, 'error'); }
+}
 async function openWorkspacePath(dir) {
   try {
     const tree = await api.workspace.load(dir);
@@ -798,10 +813,24 @@ function renderRecent() {
 function renderExplorer() {
   const host = $('tree');
   host.replaceChildren();
-  host.classList.toggle('empty', !S.rootChildren.length);
-  if (!S.root) { host.textContent = 'Open a folder to begin.'; return; }
-  if (!S.rootChildren.length) { host.textContent = 'This folder is empty.'; return; }
-  appendNodes(S.rootChildren, host, 0);
+  if (!S.roots || !S.roots.length) { host.textContent = S.root ? 'This folder is empty.' : 'Open a folder to begin.'; host.classList.toggle('empty', true); return; }
+  host.classList.toggle('empty', false);
+  for (const root of S.roots) {
+    const header = el('div', 'tree-root-header');
+    header.textContent = PB.basename(root);
+    header.title = root;
+    host.appendChild(header);
+    const kids = S.treeCache.get(root);
+    const childHost = el('div', 'tree-children');
+    host.appendChild(childHost);
+    if (kids) {
+      appendNodes(kids, childHost, 0, root);
+    } else {
+      childHost.classList.add('loading');
+      childHost.textContent = 'Loading…';
+      loadChildren(root).then(() => renderExplorer());
+    }
+  }
 }
 
 function appendNodes(nodes, host, depth) {
@@ -1717,27 +1746,38 @@ function clearResults() {
 
 async function runSearch() {
   const query = $('searchInput').value;
-  if (!S.root) { $('searchSummary').textContent = 'Open a folder to search.'; return; }
+  if (!S.roots || !S.roots.length) { $('searchSummary').textContent = 'Open a folder to search.'; return; }
   if (!query.trim()) { clearResults(); return; }
   const token = ++S.searchToken;
   $('searchSummary').textContent = 'Searching…';
   $('searchResults').replaceChildren(el('div', 'search-empty', 'Searching…'));
   try {
-    const res = await api.workspace.search({
-      root: S.root, query,
-      caseSensitive: $('searchCase').classList.contains('active'),
-      wholeWord: $('searchWord').classList.contains('active'),
-      useRegex: $('searchRegex').classList.contains('active'),
-      excludes: PB.splitExcludes(settings().excludes),
-      maxResults: 800
-    });
+    const roots = S.roots.length ? S.roots : [S.root];
+    const allHits = [];
+    let truncated = false;
+    let error = null;
+    for (const root of roots) {
+      if (token !== S.searchToken) return;
+      const res = await api.workspace.search({
+        root, query,
+        caseSensitive: $('searchCase').classList.contains('active'),
+        wholeWord: $('searchWord').classList.contains('active'),
+        useRegex: $('searchRegex').classList.contains('active'),
+        excludes: PB.splitExcludes(settings().excludes),
+        maxResults: 800
+      });
+      if (res.error) { error = res.error; break; }
+      allHits.push(...(res.hits || []));
+      if (res.truncated) truncated = true;
+      if (allHits.length >= 800) { truncated = true; break; }
+    }
     if (token !== S.searchToken) return;
-    if (res.error) {
+    if (error) {
       $('searchSummary').textContent = 'Invalid pattern.';
-      $('searchResults').replaceChildren(el('div', 'search-empty', res.error));
+      $('searchResults').replaceChildren(el('div', 'search-empty', error));
       return;
     }
-    renderSearchResults(res, query);
+    renderSearchResults({ hits: allHits.slice(0, 800), truncated, filesScanned: 0 }, query);
   } catch (err) {
     if (token !== S.searchToken) return;
     $('searchSummary').textContent = 'Search failed.';
@@ -4093,6 +4133,7 @@ function commandList() {
     { id: 'file.new', label: 'File: New File', key: 'Ctrl+N', run: () => fileNewFlow() },
     { id: 'file.open', label: 'File: Open File…', key: 'Ctrl+Alt+O', run: () => openFilesFlow() },
     { id: 'workspace.open', label: 'File: Open Folder…', key: 'Ctrl+O', run: () => openWorkspaceDialog() },
+    { id: 'workspace.addRoot', label: 'File: Add Folder to Workspace…', run: () => addRootFolder() },
     { id: 'file.save', label: 'File: Save', key: 'Ctrl+S', run: () => saveFile() },
     { id: 'file.saveAll', label: 'File: Save All', key: 'Ctrl+Alt+S', run: () => saveAll() },
     { id: 'file.close', label: 'File: Close Editor', key: 'Ctrl+W', run: () => closeEntry(currentEntry()) },
